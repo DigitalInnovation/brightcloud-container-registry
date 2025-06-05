@@ -1,0 +1,142 @@
+name: Terraform Quality
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform-azurerm-acr-platform/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform-azurerm-acr-platform/**'
+
+env:
+  TF_VERSION: '1.6.0'
+  TFLINT_VERSION: 'v0.48.0'
+  TFSEC_VERSION: 'v1.28.0'
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        working-directory: terraform-azurerm-acr-platform
+        run: terraform fmt -check -recursive
+
+      - name: Validate Modules
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          for dir in modules/*/; do
+            echo "Validating $dir"
+            cd "$dir"
+            terraform init -backend=false
+            terraform validate
+            cd ../..
+          done
+
+      - name: Validate Environments
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          for dir in environments/*/; do
+            echo "Validating $dir"
+            cd "$dir"
+            terraform init -backend=false
+            terraform validate
+            cd ../..
+          done
+
+  terraform-lint:
+    name: Terraform Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache TFLint
+        uses: actions/cache@v3
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-${{ env.TFLINT_VERSION }}-${{ hashFiles('.tflint.hcl') }}
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: Init TFLint
+        working-directory: terraform-azurerm-acr-platform
+        run: tflint --init
+
+      - name: Run TFLint on Modules
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          for dir in modules/*/; do
+            echo "Linting $dir"
+            cd "$dir"
+            tflint --config ../../../.tflint.hcl
+            cd ../..
+          done
+
+      - name: Run TFLint on Environments
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          for dir in environments/*/; do
+            echo "Linting $dir"
+            cd "$dir"
+            tflint --config ../../../.tflint.hcl
+            cd ../..
+          done
+
+  terraform-security:
+    name: Terraform Security
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform-azurerm-acr-platform
+          additional_args: --format sarif --out results.sarif
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: success() || failure()
+        with:
+          sarif_file: results.sarif
+
+  terraform-docs:
+    name: Terraform Docs
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Render terraform docs
+        uses: terraform-docs/gh-actions@v1.0.0
+        with:
+          working-dir: terraform-azurerm-acr-platform
+          output-file: README.md
+          output-method: inject
+          git-push: "false"
+
+      - name: Check for changes
+        run: |
+          if ! git diff --exit-code; then
+            echo "Documentation is out of date. Please run 'terraform-docs' and commit the changes."
+            exit 1
+          fi

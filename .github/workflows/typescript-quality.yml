@@ -1,0 +1,91 @@
+name: TypeScript Quality
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'acr-image-promotion-action/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'acr-image-promotion-action/**'
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  typescript-quality:
+    name: TypeScript Quality
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Type check
+        working-directory: acr-image-promotion-action
+        run: npm run build
+
+      - name: Lint
+        working-directory: acr-image-promotion-action
+        run: npm run lint
+
+      - name: Format check
+        working-directory: acr-image-promotion-action
+        run: npm run format:check
+
+      - name: Test
+        working-directory: acr-image-promotion-action
+        run: npm test
+
+      - name: Package
+        working-directory: acr-image-promotion-action
+        run: npm run package
+
+      - name: Check for uncommitted changes
+        run: |
+          if ! git diff --exit-code; then
+            echo "Uncommitted changes detected. Please run 'npm run package' and commit the dist/ directory."
+            git diff
+            exit 1
+          fi
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Run security audit
+        working-directory: acr-image-promotion-action
+        run: npm audit --audit-level=high
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          languages: javascript
+          source-root: acr-image-promotion-action/src
