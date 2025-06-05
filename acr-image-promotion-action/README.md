@@ -1,11 +1,11 @@
-# ACR Image Promotion Actions
+# ACR Image Promotion Action
 
-A family of GitHub Actions for promoting container images between Azure Container Registry environments with strict validation and security controls.
+A family of GitHub Actions for promoting container images between Azure Container Registry (ACR) environments with enterprise-grade security, validation, and team isolation.
 
 ## 🎯 Quick Start Actions (Recommended)
 
 ### 1. Promote to Production
-The most common operation - promotes from `dev` in nonprod registry to `prod` in production registry.
+The most common operation - promotes from `dev` in nonprod registry to `production` in production registry.
 
 ```yaml
 - name: Promote to Production
@@ -20,8 +20,8 @@ The most common operation - promotes from `dev` in nonprod registry to `prod` in
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/dev/backend-team/my-service:v1.2.3`
-- Target: `brightcloudprod-def456.azurecr.io/prod/backend-team/my-service:v1.2.3`
+- Source: `brightcloudnonprod.azurecr.io/dev/backend-team/my-service:v1.2.3`
+- Target: `brightcloudproduction.azurecr.io/production/backend-team/my-service:v1.2.3`
 
 ### 2. Promote PR to Dev
 Common for merging PR builds to development environment.
@@ -40,8 +40,8 @@ Common for merging PR builds to development environment.
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/pr/frontend-team/my-service:pr-123-abc1234`
-- Target: `brightcloudnonprod-abc123.azurecr.io/dev/frontend-team/my-service:dev-abc1234`
+- Source: `brightcloudnonprod.azurecr.io/pr/frontend-team/my-service:pr-123-abc1234`
+- Target: `brightcloudnonprod.azurecr.io/dev/frontend-team/my-service:dev-abc1234`
 
 ### 3. Promote Same Registry
 For promotions within the same registry (e.g., dev → perf, perf → preproduction).
@@ -50,7 +50,7 @@ For promotions within the same registry (e.g., dev → perf, perf → preproduct
 - name: Promote to Performance
   uses: DigitalInnovation/acr-image-promotion-action/promote-same-registry@v1
   with:
-    registry: 'brightcloudnonprod-abc123.azurecr.io'
+    registry: 'brightcloudnonprod.azurecr.io'
     source-environment: 'dev'
     target-environment: 'perf'
     team-name: 'platform-team'
@@ -62,8 +62,8 @@ For promotions within the same registry (e.g., dev → perf, perf → preproduct
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/dev/platform-team/my-service:v1.2.3`
-- Target: `brightcloudnonprod-abc123.azurecr.io/perf/platform-team/my-service:v1.2.3`
+- Source: `brightcloudnonprod.azurecr.io/dev/platform-team/my-service:v1.2.3`
+- Target: `brightcloudnonprod.azurecr.io/perf/platform-team/my-service:v1.2.3`
 
 ## 🔧 Advanced Action
 For complete control over all parameters.
@@ -72,8 +72,8 @@ For complete control over all parameters.
 - name: Custom Promotion
   uses: DigitalInnovation/acr-image-promotion-action@v1
   with:
-    source-registry: 'brightcloudnonprod-abc123.azurecr.io'
-    target-registry: 'brightcloudprod-def456.azurecr.io'
+    source-registry: 'brightcloudnonprod.azurecr.io'
+    target-registry: 'brightcloudproduction.azurecr.io'
     source-environment: 'perf'
     target-environment: 'preproduction'
     team-name: 'api-team'
@@ -205,7 +205,7 @@ jobs:
       - name: Promote to Performance
         uses: DigitalInnovation/acr-image-promotion-action/promote-same-registry@v1
         with:
-          registry: 'brightcloudnonprod-abc123.azurecr.io'
+          registry: 'brightcloudnonprod.azurecr.io'
           source-environment: 'dev'
           target-environment: 'perf'
           team-name: 'platform-team'
@@ -231,8 +231,8 @@ jobs:
       - name: Promote to Preproduction
         uses: DigitalInnovation/acr-image-promotion-action@v1
         with:
-          source-registry: 'brightcloudnonprod-abc123.azurecr.io'
-          target-registry: 'brightcloudprod-def456.azurecr.io'
+          source-registry: 'brightcloudnonprod.azurecr.io'
+          target-registry: 'brightcloudproduction.azurecr.io'
           source-environment: 'perf'
           target-environment: 'preproduction'
           team-name: 'platform-team'
@@ -258,7 +258,7 @@ jobs:
       - name: Promote to Production
         uses: DigitalInnovation/acr-image-promotion-action/promote-same-registry@v1
         with:
-          registry: 'brightcloudprod-def456.azurecr.io'
+          registry: 'brightcloudproduction.azurecr.io'
           source-environment: 'preproduction'
           target-environment: 'production'
           team-name: 'platform-team'
@@ -336,8 +336,8 @@ PR → Dev → Feature Testing
 
 ### Registry Defaults
 
-- **Nonprod Registry**: `brightcloudnonprod-abc123.azurecr.io`
-- **Prod Registry**: `brightcloudprod-def456.azurecr.io`
+- **Nonprod Registry**: `brightcloudnonprod.azurecr.io`
+- **Prod Registry**: `brightcloudproduction.azurecr.io`
 
 These can be overridden in the quick-start actions if your registries have different names.
 
