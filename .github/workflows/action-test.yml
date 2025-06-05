@@ -23,6 +23,10 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
     
     steps:
       - name: Checkout
@@ -37,18 +41,22 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Run linting
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run lint
 
       - name: Run type checking
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run type-check
 
       - name: Run tests with coverage
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run test:ci
 
       - name: Upload coverage to Codecov
@@ -59,7 +67,7 @@ jobs:
           name: acr-image-promotion-action
 
       - name: Upload test results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: action-test-results
@@ -67,9 +75,10 @@ jobs:
             acr-image-promotion-action/coverage/
             acr-image-promotion-action/coverage/junit.xml
           retention-days: 30
+          if-no-files-found: error
 
       - name: Comment Coverage on PR
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -102,8 +111,12 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     environment: testing
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' }}
     
     steps:
       - name: Checkout
@@ -118,10 +131,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Build action
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run package
 
       - name: Azure Login
@@ -161,7 +176,8 @@ jobs:
           dry-run: 'true'
 
       - name: Verify Invalid Input Failed
-        if: steps.invalid-test.outcome == 'success'
+        if: ${{ steps.invalid-test.outcome == 'success' }}
+        shell: bash
         run: |
           echo "::error::Integration test should have failed with invalid inputs"
           exit 1
@@ -169,6 +185,9 @@ jobs:
   build-and-package:
     name: Build and Package
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -183,13 +202,16 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Build and package
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run package
 
       - name: Check for uncommitted changes
+        shell: bash
         run: |
           if ! git diff --exit-code; then
             echo "::error::Uncommitted changes detected after packaging. Please run 'npm run package' and commit the changes."
@@ -203,10 +225,15 @@ jobs:
           name: packaged-action
           path: acr-image-promotion-action/dist/
           retention-days: 7
+          if-no-files-found: error
 
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -221,10 +248,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Run security audit
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm audit --audit-level=high
 
       - name: Run CodeQL Analysis
@@ -243,7 +272,7 @@ jobs:
           generateSarif: "1"
 
       - name: Upload SARIF file
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
@@ -251,51 +280,57 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     needs: [test, integration-test, build-and-package, security-scan]
-    if: always()
+    if: ${{ !cancelled() }}
     
     steps:
       - name: Generate Summary
+        shell: bash
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          INTEGRATION_RESULT: ${{ needs.integration-test.result }}
+          BUILD_RESULT: ${{ needs.build-and-package.result }}
+          SECURITY_RESULT: ${{ needs.security-scan.result }}
         run: |
-          echo "## Action Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Action Test Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
           
           # Unit tests
-          if [ "${{ needs.test.result }}" == "success" ]; then
-            echo "✅ Unit tests passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$TEST_RESULT" == "success" ]; then
+            echo "✅ Unit tests passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Unit tests failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Unit tests failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Integration tests
-          if [ "${{ needs.integration-test.result }}" == "success" ]; then
-            echo "✅ Integration tests passed" >> $GITHUB_STEP_SUMMARY
-          elif [ "${{ needs.integration-test.result }}" == "skipped" ]; then
-            echo "⏭️ Integration tests skipped" >> $GITHUB_STEP_SUMMARY
+          if [ "$INTEGRATION_RESULT" == "success" ]; then
+            echo "✅ Integration tests passed" >> "${GITHUB_STEP_SUMMARY}"
+          elif [ "$INTEGRATION_RESULT" == "skipped" ]; then
+            echo "⏭️ Integration tests skipped" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Integration tests failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Integration tests failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Build and package
-          if [ "${{ needs.build-and-package.result }}" == "success" ]; then
-            echo "✅ Build and package succeeded" >> $GITHUB_STEP_SUMMARY
+          if [ "$BUILD_RESULT" == "success" ]; then
+            echo "✅ Build and package succeeded" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Build and package failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Build and package failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Security scan
-          if [ "${{ needs.security-scan.result }}" == "success" ]; then
-            echo "✅ Security scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$SECURITY_RESULT" == "success" ]; then
+            echo "✅ Security scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Security scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Security scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
 
       - name: Check Overall Status
-        if: |
-          needs.test.result != 'success' ||
-          needs.build-and-package.result != 'success' ||
-          needs.security-scan.result != 'success' ||
-          (needs.integration-test.result != 'success' && needs.integration-test.result != 'skipped')
+        if: ${{ needs.test.result != 'success' || needs.build-and-package.result != 'success' || needs.security-scan.result != 'success' || (needs.integration-test.result != 'success' && needs.integration-test.result != 'skipped') }}
+        shell: bash
         run: |
           echo "::error::One or more test jobs failed. Please review the results before merging."
           exit 1
