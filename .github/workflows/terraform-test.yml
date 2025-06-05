@@ -29,7 +29,11 @@ jobs:
   terraform-test:
     name: Terraform Tests
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule' || github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    if: ${{ github.event_name != 'schedule' || github.ref == 'refs/heads/main' }}
     
     strategy:
       fail-fast: false
@@ -72,13 +76,15 @@ jobs:
 
       - name: Install Go dependencies
         working-directory: terraform-azurerm-acr-platform/test
+        shell: bash
         run: |
           go mod download
           go mod tidy
 
       - name: Run Unit Tests
-        if: matrix.test-suite == 'unit-tests'
+        if: ${{ matrix.test-suite == 'unit-tests' }}
         working-directory: terraform-azurerm-acr-platform/test
+        shell: bash
         run: |
           make test-unit
         env:
@@ -89,8 +95,9 @@ jobs:
           TF_VAR_location: "North Europe"
 
       - name: Run Integration Tests
-        if: matrix.test-suite == 'integration-tests'
+        if: ${{ matrix.test-suite == 'integration-tests' }}
         working-directory: terraform-azurerm-acr-platform/test
+        shell: bash
         run: |
           make test-integration
         env:
@@ -101,7 +108,7 @@ jobs:
           TF_VAR_location: "North Europe"
 
       - name: Upload Test Results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: terraform-test-results-${{ matrix.test-suite }}
@@ -111,7 +118,7 @@ jobs:
           retention-days: 30
 
       - name: Comment Test Results on PR
-        if: github.event_name == 'pull_request' && always()
+        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -120,7 +127,8 @@ jobs:
             
             if (fs.existsSync(path)) {
               const testResults = fs.readFileSync(path, 'utf8');
-              const comment = `## Terraform Test Results (${{ matrix.test-suite }})
+              const testSuite = '${{ matrix.test-suite }}';
+              const comment = `## Terraform Test Results (${testSuite})
               
               <details>
               <summary>Test Summary</summary>
@@ -141,7 +149,12 @@ jobs:
   terraform-drift-detection:
     name: Terraform Drift Detection
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+    if: ${{ github.event_name == 'schedule' }}
     
     steps:
       - name: Checkout
@@ -161,6 +174,7 @@ jobs:
 
       - name: Check for Configuration Drift
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           # Check each environment for drift
           for env in sandbox nonprod production; do
@@ -172,10 +186,14 @@ jobs:
               
               # Run plan and capture output
               if ! terraform plan -detailed-exitcode -out=drift.tfplan; then
-                echo "::warning::Drift detected in $env environment"
+                {
+                  echo "drift_warning=Drift detected in $env environment"
+                } >> "$GITHUB_ENV"
                 terraform show drift.tfplan
               else
-                echo "::notice::No drift detected in $env environment"
+                {
+                  echo "drift_notice=No drift detected in $env environment"
+                } >> "$GITHUB_ENV"
               fi
               
               cd ../..
@@ -183,18 +201,19 @@ jobs:
           done
 
       - name: Create Drift Issue
-        if: failure()
+        if: ${{ failure() }}
         uses: actions/github-script@v7
         with:
           script: |
             const title = 'Terraform Configuration Drift Detected';
+            const workflowUrl = `${context.payload.repository.html_url}/actions/runs/${context.runId}`;
             const body = `
             ## Terraform Drift Detection Alert
             
             Configuration drift has been detected in one or more environments.
             
             **Detected on**: ${new Date().toISOString()}
-            **Workflow**: [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            **Workflow**: [${context.workflow}](${workflowUrl})
             
             Please review the drift and take appropriate action:
             1. If the changes are expected, update the Terraform configuration
@@ -219,8 +238,11 @@ jobs:
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     needs: [terraform-test]
-    if: always() && github.event_name == 'pull_request'
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     
     steps:
       - name: Download Test Results
@@ -229,26 +251,31 @@ jobs:
           path: test-results
 
       - name: Generate Test Summary
+        shell: bash
         run: |
-          echo "## Terraform Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          # Check test results
-          if find test-results -name "*.xml" -type f | head -1 | xargs -I {} test -f {}; then
-            echo "✅ Tests completed successfully" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ Tests failed or incomplete" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Test Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Unit test results: Available in artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Integration test results: Available in artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- Coverage reports: Available in artifacts" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Terraform Test Summary"
+            echo ""
+            
+            # Check test results
+            if find test-results -name "*.xml" -type f | head -1 | xargs -I {} test -f {}; then
+              echo "✅ Tests completed successfully"
+            else
+              echo "❌ Tests failed or incomplete"
+            fi
+            
+            echo ""
+            echo "### Test Artifacts"
+            echo "- Unit test results: Available in artifacts"
+            echo "- Integration test results: Available in artifacts"
+            echo "- Coverage reports: Available in artifacts"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check Test Status
+        shell: bash
         run: |
-          if [ "${{ needs.terraform-test.result }}" != "success" ]; then
+          test_result="${{ needs.terraform-test.result }}"
+          if [ "$test_result" != "success" ]; then
             echo "::error::Terraform tests failed. Please review the test results before merging."
             exit 1
           fi
