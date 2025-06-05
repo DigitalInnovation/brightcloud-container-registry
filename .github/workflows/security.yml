@@ -18,7 +18,11 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
-    if: github.event_name != 'schedule' || github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      contents: read
+    if: ${{ github.event_name != 'schedule' || github.ref == 'refs/heads/main' }}
     
     strategy:
       fail-fast: false
@@ -36,7 +40,7 @@ jobs:
           queries: security-extended,security-and-quality
 
       - name: Setup Node.js
-        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        if: ${{ matrix.language == 'javascript' || matrix.language == 'typescript' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -44,13 +48,15 @@ jobs:
           cache-dependency-path: acr-image-promotion-action/package-lock.json
 
       - name: Install dependencies
-        if: matrix.language == 'javascript' || matrix.language == 'typescript'
+        if: ${{ matrix.language == 'javascript' || matrix.language == 'typescript' }}
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Build TypeScript
-        if: matrix.language == 'typescript'
+        if: ${{ matrix.language == 'typescript' }}
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run build
 
       - name: Perform CodeQL Analysis
@@ -61,6 +67,10 @@ jobs:
   semgrep:
     name: Semgrep Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -81,7 +91,7 @@ jobs:
           generateSarif: "1"
 
       - name: Upload SARIF file
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: semgrep.sarif
@@ -89,6 +99,10 @@ jobs:
   trivy:
     name: Trivy Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -104,7 +118,7 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
@@ -112,6 +126,10 @@ jobs:
   dependency-scan:
     name: Dependency Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -126,6 +144,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Run Snyk to check for vulnerabilities
@@ -136,24 +155,26 @@ jobs:
           args: --severity-threshold=high --file=acr-image-promotion-action/package.json
           
       - name: Upload Snyk result to GitHub Code Scanning
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: snyk.sarif
 
       - name: Run npm audit
         working-directory: acr-image-promotion-action
+        shell: bash
         run: |
           npm audit --audit-level=moderate --json > npm-audit.json || true
           npm audit --audit-level=moderate
 
       - name: Upload npm audit results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: npm-audit-results
           path: acr-image-promotion-action/npm-audit.json
           retention-days: 30
+          if-no-files-found: error
 
       - name: Setup Go
         uses: actions/setup-go@v4
@@ -163,25 +184,31 @@ jobs:
 
       - name: Install Go dependencies
         working-directory: terraform-azurerm-acr-platform/test
+        shell: bash
         run: go mod download
 
       - name: Run Go vulnerability scan
         working-directory: terraform-azurerm-acr-platform/test
+        shell: bash
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./... | tee govulncheck.txt || true
 
       - name: Upload Go vulnerability results
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v3
         with:
           name: go-vulnerability-results
           path: terraform-azurerm-acr-platform/test/govulncheck.txt
           retention-days: 30
+          if-no-files-found: error
 
   secrets-scan:
     name: Secrets Detection
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -200,11 +227,15 @@ jobs:
       - name: GitLeaks scan
         uses: gitleaks/gitleaks-action@v2
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
 
   terraform-security:
     name: Terraform Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -224,7 +255,7 @@ jobs:
           additional_args: --config-file=../.tfsec/config.yml
 
       - name: Upload tfsec SARIF
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
@@ -239,7 +270,7 @@ jobs:
           soft_fail: true
 
       - name: Upload Checkov SARIF
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: checkov-results.sarif
@@ -256,6 +287,10 @@ jobs:
   docker-security:
     name: Docker Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -270,7 +305,7 @@ jobs:
           failure-threshold: error
 
       - name: Upload Hadolint SARIF
-        if: always()
+        if: ${{ !cancelled() }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: hadolint-results.sarif
@@ -278,6 +313,9 @@ jobs:
   compliance-check:
     name: Compliance Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -285,6 +323,7 @@ jobs:
 
 
       - name: Check Security Documentation
+        shell: bash
         run: |
           required_docs=(
             "SECURITY.md"
@@ -299,6 +338,7 @@ jobs:
           done
 
       - name: Validate GitHub Actions Security
+        shell: bash
         run: |
           # Check for pinned action versions
           workflow_files=$(find .github/workflows -name "*.yml" -o -name "*.yaml")
@@ -317,6 +357,7 @@ jobs:
           done
 
       - name: GDPR Compliance Check
+        shell: bash
         run: |
           # Check for data processing documentation
           if [ ! -f "PRIVACY.md" ] && [ ! -f "docs/privacy.md" ]; then
@@ -332,92 +373,115 @@ jobs:
   security-summary:
     name: Security Summary
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write
+      contents: read
     needs: [codeql, semgrep, trivy, dependency-scan, secrets-scan, terraform-security, docker-security, compliance-check]
-    if: always()
+    if: ${{ !cancelled() }}
     
     steps:
       - name: Generate Security Summary
+        shell: bash
+        env:
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          TRIVY_RESULT: ${{ needs.trivy.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency-scan.result }}
+          SECRETS_RESULT: ${{ needs.secrets-scan.result }}
+          TERRAFORM_RESULT: ${{ needs.terraform-security.result }}
+          DOCKER_RESULT: ${{ needs.docker-security.result }}
+          COMPLIANCE_RESULT: ${{ needs.compliance-check.result }}
         run: |
-          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Security Scan Summary" >> "${GITHUB_STEP_SUMMARY}"
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
           
           # CodeQL
-          if [ "${{ needs.codeql.result }}" == "success" ]; then
-            echo "✅ CodeQL analysis passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$CODEQL_RESULT" == "success" ]; then
+            echo "✅ CodeQL analysis passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ CodeQL analysis failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ CodeQL analysis failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Semgrep
-          if [ "${{ needs.semgrep.result }}" == "success" ]; then
-            echo "✅ Semgrep security scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$SEMGREP_RESULT" == "success" ]; then
+            echo "✅ Semgrep security scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Semgrep security scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Semgrep security scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Trivy
-          if [ "${{ needs.trivy.result }}" == "success" ]; then
-            echo "✅ Trivy vulnerability scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$TRIVY_RESULT" == "success" ]; then
+            echo "✅ Trivy vulnerability scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Trivy vulnerability scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Trivy vulnerability scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Dependency scan
-          if [ "${{ needs.dependency-scan.result }}" == "success" ]; then
-            echo "✅ Dependency security scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$DEPENDENCY_RESULT" == "success" ]; then
+            echo "✅ Dependency security scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Dependency security scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Dependency security scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Secrets scan
-          if [ "${{ needs.secrets-scan.result }}" == "success" ]; then
-            echo "✅ Secrets detection passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$SECRETS_RESULT" == "success" ]; then
+            echo "✅ Secrets detection passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Secrets detection failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Secrets detection failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Terraform security
-          if [ "${{ needs.terraform-security.result }}" == "success" ]; then
-            echo "✅ Terraform security scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$TERRAFORM_RESULT" == "success" ]; then
+            echo "✅ Terraform security scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Terraform security scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Terraform security scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Docker security
-          if [ "${{ needs.docker-security.result }}" == "success" ]; then
-            echo "✅ Docker security scan passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$DOCKER_RESULT" == "success" ]; then
+            echo "✅ Docker security scan passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Docker security scan failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Docker security scan failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
           # Compliance check
-          if [ "${{ needs.compliance-check.result }}" == "success" ]; then
-            echo "✅ Compliance validation passed" >> $GITHUB_STEP_SUMMARY
+          if [ "$COMPLIANCE_RESULT" == "success" ]; then
+            echo "✅ Compliance validation passed" >> "${GITHUB_STEP_SUMMARY}"
           else
-            echo "❌ Compliance validation failed" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Compliance validation failed" >> "${GITHUB_STEP_SUMMARY}"
           fi
           
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Security Reports" >> $GITHUB_STEP_SUMMARY
-          echo "- All security findings are available in the Security tab" >> $GITHUB_STEP_SUMMARY
-          echo "- SARIF reports have been uploaded for detailed analysis" >> $GITHUB_STEP_SUMMARY
-          echo "- Dependency scan results are available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> "${GITHUB_STEP_SUMMARY}"
+          echo "### Security Reports" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- All security findings are available in the Security tab" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- SARIF reports have been uploaded for detailed analysis" >> "${GITHUB_STEP_SUMMARY}"
+          echo "- Dependency scan results are available in artifacts" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Comment Security Status on PR
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
+        env:
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          TRIVY_RESULT: ${{ needs.trivy.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency-scan.result }}
+          SECRETS_RESULT: ${{ needs.secrets-scan.result }}
+          TERRAFORM_RESULT: ${{ needs.terraform-security.result }}
+          DOCKER_RESULT: ${{ needs.docker-security.result }}
+          COMPLIANCE_RESULT: ${{ needs.compliance-check.result }}
         with:
           script: |
             const failed_jobs = [];
             const jobs = {
-              'CodeQL': '${{ needs.codeql.result }}',
-              'Semgrep': '${{ needs.semgrep.result }}',
-              'Trivy': '${{ needs.trivy.result }}',
-              'Dependency Scan': '${{ needs.dependency-scan.result }}',
-              'Secrets Scan': '${{ needs.secrets-scan.result }}',
-              'Terraform Security': '${{ needs.terraform-security.result }}',
-              'Docker Security': '${{ needs.docker-security.result }}',
-              'Compliance Check': '${{ needs.compliance-check.result }}'
+              'CodeQL': process.env.CODEQL_RESULT,
+              'Semgrep': process.env.SEMGREP_RESULT,
+              'Trivy': process.env.TRIVY_RESULT,
+              'Dependency Scan': process.env.DEPENDENCY_RESULT,
+              'Secrets Scan': process.env.SECRETS_RESULT,
+              'Terraform Security': process.env.TERRAFORM_RESULT,
+              'Docker Security': process.env.DOCKER_RESULT,
+              'Compliance Check': process.env.COMPLIANCE_RESULT
             };
             
             Object.entries(jobs).forEach(([job, result]) => {
@@ -453,12 +517,22 @@ jobs:
             });
 
       - name: Check Security Gate
+        shell: bash
+        env:
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          TRIVY_RESULT: ${{ needs.trivy.result }}
+          DEPENDENCY_RESULT: ${{ needs.dependency-scan.result }}
+          SECRETS_RESULT: ${{ needs.secrets-scan.result }}
+          TERRAFORM_RESULT: ${{ needs.terraform-security.result }}
+          DOCKER_RESULT: ${{ needs.docker-security.result }}
+          COMPLIANCE_RESULT: ${{ needs.compliance-check.result }}
         run: |
           failed_jobs=0
           
-          if [ "${{ needs.codeql.result }}" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
-          if [ "${{ needs.secrets-scan.result }}" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
-          if [ "${{ needs.compliance-check.result }}" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
+          if [ "$CODEQL_RESULT" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
+          if [ "$SECRETS_RESULT" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
+          if [ "$COMPLIANCE_RESULT" != "success" ]; then failed_jobs=$((failed_jobs + 1)); fi
           
           # Critical security checks that must pass
           if [ $failed_jobs -gt 0 ]; then
@@ -468,11 +542,11 @@ jobs:
           
           # Warning for other failed checks but don't block
           other_failed=0
-          if [ "${{ needs.semgrep.result }}" != "success" ]; then other_failed=$((other_failed + 1)); fi
-          if [ "${{ needs.trivy.result }}" != "success" ]; then other_failed=$((other_failed + 1)); fi
-          if [ "${{ needs.dependency-scan.result }}" != "success" ]; then other_failed=$((other_failed + 1)); fi
-          if [ "${{ needs.terraform-security.result }}" != "success" ]; then other_failed=$((other_failed + 1)); fi
-          if [ "${{ needs.docker-security.result }}" != "success" ]; then other_failed=$((other_failed + 1)); fi
+          if [ "$SEMGREP_RESULT" != "success" ]; then other_failed=$((other_failed + 1)); fi
+          if [ "$TRIVY_RESULT" != "success" ]; then other_failed=$((other_failed + 1)); fi
+          if [ "$DEPENDENCY_RESULT" != "success" ]; then other_failed=$((other_failed + 1)); fi
+          if [ "$TERRAFORM_RESULT" != "success" ]; then other_failed=$((other_failed + 1)); fi
+          if [ "$DOCKER_RESULT" != "success" ]; then other_failed=$((other_failed + 1)); fi
           
           if [ $other_failed -gt 0 ]; then
             echo "::warning::$other_failed non-critical security checks failed. Please review findings."
