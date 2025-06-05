@@ -380,6 +380,3 @@ Enable debug logging:
 
 See our [contribution guidelines](CONTRIBUTING.md) for details on submitting improvements and bug fixes.
 
-## 📄 License
-
-MIT License - see [LICENSE](LICENSE) for details.

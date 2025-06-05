@@ -296,6 +296,3 @@ For guidance on migrating from previous versions, see [Migration Guide](../../do
 
 Please read our [contributing guidelines](../../CONTRIBUTING.md) before submitting changes.
 
-## License
-
-This module is licensed under the MIT License. See [LICENSE](../../LICENSE) for full details.

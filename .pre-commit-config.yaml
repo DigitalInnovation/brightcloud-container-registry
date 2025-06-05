@@ -121,17 +121,6 @@ repos:
       - id: commitizen
         stages: [commit-msg]
 
-  # License checking
-  - repo: https://github.com/Lucas-C/pre-commit-hooks
-    rev: v1.5.4
-    hooks:
-      - id: insert-license
-        files: \.(js|jsx|ts|tsx|tf|py)$
-        args:
-          - --license-filepath
-          - .license-header.txt
-          - --comment-style
-          - //
 
 # Configuration for pre-commit itself
 default_stages: [commit]

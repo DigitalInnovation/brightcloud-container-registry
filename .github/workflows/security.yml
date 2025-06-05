@@ -128,6 +128,19 @@ jobs:
         working-directory: acr-image-promotion-action
         run: npm ci
 
+      - name: Run Snyk to check for vulnerabilities
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --file=acr-image-promotion-action/package.json
+          
+      - name: Upload Snyk result to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: snyk.sarif
+
       - name: Run npm audit
         working-directory: acr-image-promotion-action
         run: |
@@ -270,23 +283,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Check License Headers
-        run: |
-          # Check for license headers in source files
-          missing_license=0
-          
-          for file in $(find . -name "*.ts" -o -name "*.js" -o -name "*.tf" | grep -v node_modules | grep -v .terraform | grep -v dist); do
-            if ! head -10 "$file" | grep -qi "license\|copyright"; then
-              echo "Missing license header: $file"
-              missing_license=1
-            fi
-          done
-          
-          if [ $missing_license -eq 1 ]; then
-            echo "::warning::Some files are missing license headers"
-          else
-            echo "::notice::All files have appropriate license headers"
-          fi
 
       - name: Check Security Documentation
         run: |

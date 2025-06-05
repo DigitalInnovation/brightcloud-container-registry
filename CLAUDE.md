@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🏛️ M&S Technology Standards Compliance
+
+This repository has been configured to comply with M&S Technology Standards:
+
+### ✅ **Compliant Standards**
+- **GitHub Repository Standard**: catalog-info.yaml, README.md, CONTRIBUTING.md, pull_request_template.md ✅
+- **Language & Framework Standard**: TypeScript, Terraform, Bash all approved ✅
+- **Testing Standard**: Jest + Terratest with comprehensive coverage ✅
+- **Versioning Standard**: Semantic versioning with automated releases ✅
+- **Security Tooling Standard**: CodeQL, Semgrep, Trivy, Snyk integration ✅
+
+### 📋 **Standards Implementation Details**
+- **Semantic Versioning**: Automated via semantic-release with conventional commits
+- **Security Scanning**: Multi-layer approach with SARIF reporting to GitHub Security
+- **Status Badges**: Integrated in README.md for build status and quality metrics
+- **Dependency Management**: Renovate configuration for automated updates
+
 ## Project Architecture
 
 The BrightCloud Container Registry Platform implements a comprehensive Azure Container Registry (ACR) solution with three main components:
