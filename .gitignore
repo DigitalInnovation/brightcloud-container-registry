@@ -164,6 +164,7 @@ tmp/
 temp/
 .cache/
 .claude/
+CLAUDE.md
 
 # Platform Specific
 # =================
