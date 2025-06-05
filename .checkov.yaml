@@ -1,0 +1,40 @@
+branch: main
+download-external-modules: true
+evaluate-variables: true
+external-modules-download-path: .external_modules
+
+framework:
+  - terraform
+  - dockerfile
+  - secrets
+  - json
+  - yaml
+
+output:
+  - cli
+  - sarif
+  - json
+
+sarif-file-path: ./checkov-report.sarif
+output-file-path: ./checkov-report.json
+
+skip-check:
+  # Skip checks that are not applicable or too restrictive
+  - CKV_AZURE_4    # Ensure default network access rule for Storage Accounts is set to deny
+  - CKV_AZURE_33   # Ensure Storage logging is enabled for Queue service for read, write and delete requests
+  - CKV_AZURE_35   # Ensure default network access rule for Storage Accounts is set to deny
+  - CKV_AZURE_36   # Ensure 'Trusted Microsoft Services' is enabled for Storage Account access
+  - CKV_AZURE_44   # Ensure Storage Account is using the latest version of TLS encryption
+  - CKV_AZURE_137  # Ensure that key vault enables purge protection
+  - CKV_TF_1       # Ensure Terraform module sources use a commit hash
+
+hard-fail-on:
+  - HIGH
+  - CRITICAL
+
+soft-fail-on:
+  - MEDIUM
+  - LOW
+
+quiet: false
+compact: false

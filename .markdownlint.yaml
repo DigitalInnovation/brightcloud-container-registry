@@ -1,0 +1,47 @@
+default: true
+
+# Line length
+MD013:
+  line_length: 120
+  code_blocks: false
+  tables: false
+  headings: false
+
+# Multiple top level headings in the same document
+MD025: false
+
+# Multiple headings with the same content
+MD024:
+  siblings_only: true
+
+# Inline HTML
+MD033:
+  allowed_elements: ['br', 'sub', 'sup', 'kbd', 'img']
+
+# Bare URL used
+MD034: false
+
+# First line in file should be a top level heading
+MD041: false
+
+# Expected: atx; Actual: setext (heading style)
+MD003:
+  style: atx
+
+# Unordered list style
+MD004:
+  style: dash
+
+# Ordered list item prefix
+MD029:
+  style: ordered
+
+# Emphasis used instead of a heading
+MD036: false
+
+# Code fence style
+MD046:
+  style: fenced
+
+# Link fragments
+MD051: false
