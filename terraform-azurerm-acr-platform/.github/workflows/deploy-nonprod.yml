@@ -32,6 +32,11 @@ jobs:
   terraform:
     name: Terraform Non-Prod
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
     environment: nonprod
     
     steps:
@@ -52,6 +57,7 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           terraform init \
             -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
@@ -61,11 +67,13 @@ jobs:
 
       - name: Terraform Validate
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: terraform validate
 
       - name: Terraform Plan
         id: plan
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           terraform plan \
             -var-file="terraform.tfvars" \
@@ -74,7 +82,7 @@ jobs:
         continue-on-error: true
 
       - name: Add Plan Comment to PR
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -88,22 +96,28 @@ jobs:
               comment.user.type === 'Bot' && comment.body.includes('Terraform Plan - Non-Prod')
             );
             
+            const planResult = '${{ steps.plan.outcome }}';
+            const exitCode = '${{ steps.plan.outputs.exitcode }}';
+            const planOutput = `${{ steps.plan.outputs.stdout }}`;
+            const workflowName = '${{ github.workflow }}';
+            const eventName = '${{ github.event_name }}';
+            
             const output = `## 🏗️ Terraform Plan - Non-Prod ACR
             
-            **Plan Result**: ${{ steps.plan.outcome }}
-            **Exit Code**: ${{ steps.plan.outputs.exitcode }}
+            **Plan Result**: ${planResult}
+            **Exit Code**: ${exitCode}
             
             <details>
             <summary>Show Plan</summary>
             
             \`\`\`
-            ${{ steps.plan.outputs.stdout }}
+            ${planOutput}
             \`\`\`
             
             </details>
             
-            *Workflow: \`${{ github.workflow }}\`*
-            *Action: \`${{ github.event_name }}\`*
+            *Workflow: \`${workflowName}\`*
+            *Action: \`${eventName}\`*
             `;
             
             if (botComment) {
@@ -123,21 +137,21 @@ jobs:
             }
 
       - name: Terraform Apply
-        if: >
-          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
-          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        if: ${{ (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply') }}
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: terraform apply -auto-approve tfplan
 
       - name: Terraform Destroy
-        if: github.event_name == 'workflow_dispatch' && inputs.action == 'destroy'
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'destroy' }}
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           terraform plan -destroy -var-file="terraform.tfvars" -out=destroy-plan
           terraform apply -auto-approve destroy-plan
 
       - name: Upload Terraform Plan
-        if: steps.plan.outcome == 'success'
+        if: ${{ steps.plan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: nonprod-tfplan
@@ -145,14 +159,18 @@ jobs:
           retention-days: 5
 
       - name: Post-deployment validation
-        if: >
-          (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
-          (github.event_name == 'workflow_dispatch' && inputs.action == 'apply')
+        if: ${{ (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.action == 'apply') }}
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           # Get registry details
           REGISTRY_NAME=$(terraform output -raw registry_name)
           REGISTRY_URL=$(terraform output -raw registry_url)
+          
+          {
+            echo "REGISTRY_NAME=${REGISTRY_NAME}"
+            echo "REGISTRY_URL=${REGISTRY_URL}"
+          } >> "$GITHUB_ENV"
           
           echo "✅ Non-prod ACR deployed successfully"
           echo "Registry Name: $REGISTRY_NAME"

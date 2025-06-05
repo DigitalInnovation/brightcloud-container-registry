@@ -29,9 +29,13 @@ jobs:
   validate-input:
     name: Validate Production Input
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Validate confirmation
-        if: inputs.confirm_production != 'CONFIRM'
+        if: ${{ inputs.confirm_production != 'CONFIRM' }}
+        shell: bash
         run: |
           echo "❌ Production deployment requires explicit confirmation"
           echo "Please enter 'CONFIRM' in the confirm_production field"
@@ -40,6 +44,11 @@ jobs:
   terraform:
     name: Terraform Production
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+      issues: write
     needs: validate-input
     environment: production
     
@@ -61,6 +70,7 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           terraform init \
             -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
@@ -70,11 +80,13 @@ jobs:
 
       - name: Terraform Validate
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: terraform validate
 
       - name: Terraform Plan
         id: plan
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           terraform plan \
             -var-file="terraform.tfvars" \
@@ -84,6 +96,7 @@ jobs:
 
       - name: Security Scan of Terraform Plan
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           # Convert plan to JSON for analysis
           terraform show -json tfplan > tfplan.json
@@ -108,7 +121,8 @@ jobs:
           echo "✅ Security scan passed"
 
       - name: Manual Approval Required
-        if: inputs.action == 'apply'
+        if: ${{ inputs.action == 'apply' }}
+        shell: bash
         run: |
           echo "🚨 PRODUCTION DEPLOYMENT"
           echo "This will deploy changes to the production ACR infrastructure."
@@ -122,15 +136,16 @@ jobs:
           echo "- Enhanced security policies"
 
       - name: Terraform Apply
-        if: inputs.action == 'apply'
+        if: ${{ inputs.action == 'apply' }}
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           echo "🚀 Applying Terraform changes to production..."
           terraform apply -auto-approve tfplan
           echo "✅ Production ACR deployment completed"
 
       - name: Upload Terraform Plan
-        if: steps.plan.outcome == 'success'
+        if: ${{ steps.plan.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: production-tfplan
@@ -138,12 +153,18 @@ jobs:
           retention-days: 30
 
       - name: Post-deployment validation
-        if: inputs.action == 'apply'
+        if: ${{ inputs.action == 'apply' }}
         working-directory: ${{ env.WORKING_DIR }}
+        shell: bash
         run: |
           # Get registry details
           REGISTRY_NAME=$(terraform output -raw registry_name)
           REGISTRY_URL=$(terraform output -raw registry_url)
+          
+          {
+            echo "REGISTRY_NAME=${REGISTRY_NAME}"
+            echo "REGISTRY_URL=${REGISTRY_URL}"
+          } >> "$GITHUB_ENV"
           
           echo "✅ Production ACR deployed successfully"
           echo "Registry Name: $REGISTRY_NAME"
@@ -180,18 +201,19 @@ jobs:
           echo "🎉 All production security validations passed"
 
       - name: Create deployment issue
-        if: inputs.action == 'apply'
+        if: ${{ inputs.action == 'apply' }}
         uses: actions/github-script@v7
         with:
           script: |
             const registryName = process.env.REGISTRY_NAME;
             const registryUrl = process.env.REGISTRY_URL;
+            const deploymentDate = new Date().toISOString();
             
             const issueBody = `## 🎉 Production ACR Deployment Complete
             
             **Registry Name**: \`${registryName}\`
             **Registry URL**: \`${registryUrl}\`
-            **Deployment Date**: ${new Date().toISOString()}
+            **Deployment Date**: ${deploymentDate}
             
             ### Next Steps
             1. Update team documentation with new registry details
@@ -209,7 +231,7 @@ jobs:
             /label deployment,production,acr
             `;
             
-            github.rest.issues.create({
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `Production ACR Deployment - ${registryName}`,
