@@ -10,6 +10,9 @@ jobs:
   pre-commit:
     name: Pre-commit Hooks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -21,14 +24,19 @@ jobs:
           python-version: '3.11'
 
       - name: Install pre-commit
+        shell: bash
         run: pip install pre-commit
 
       - name: Run pre-commit
+        shell: bash
         run: pre-commit run --all-files
 
   editorconfig:
     name: EditorConfig
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -40,6 +48,9 @@ jobs:
   markdown-lint:
     name: Markdown Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -53,6 +64,9 @@ jobs:
   yaml-lint:
     name: YAML Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -64,14 +78,19 @@ jobs:
           python-version: '3.11'
 
       - name: Install yamllint
+        shell: bash
         run: pip install yamllint
 
       - name: Run yamllint
+        shell: bash
         run: yamllint .
 
   link-check:
     name: Link Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -86,6 +105,9 @@ jobs:
   spell-check:
     name: Spell Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout

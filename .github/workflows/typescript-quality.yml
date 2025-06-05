@@ -17,6 +17,9 @@ jobs:
   typescript-quality:
     name: TypeScript Quality
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -31,29 +34,36 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Type check
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run build
 
       - name: Lint
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run lint
 
       - name: Format check
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run format:check
 
       - name: Test
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm test
 
       - name: Package
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run package
 
       - name: Check for uncommitted changes
+        shell: bash
         run: |
           if ! git diff --exit-code; then
             echo "Uncommitted changes detected. Please run 'npm run package' and commit the dist/ directory."
@@ -64,6 +74,10 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      contents: read
     
     steps:
       - name: Checkout
@@ -78,10 +92,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Run security audit
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm audit --audit-level=high
 
       - name: Run CodeQL Analysis
