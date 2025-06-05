@@ -11,6 +11,7 @@ The most common operation - promotes from `dev` in nonprod registry to `prod` in
 - name: Promote to Production
   uses: DigitalInnovation/acr-image-promotion-action/promote-to-production@v1
   with:
+    team-name: 'backend-team'
     image-name: 'my-service'
     source-tag: 'v1.2.3'
     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -19,8 +20,8 @@ The most common operation - promotes from `dev` in nonprod registry to `prod` in
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/dev/my-service:v1.2.3`
-- Target: `brightcloudprod-def456.azurecr.io/prod/my-service:v1.2.3`
+- Source: `brightcloudnonprod-abc123.azurecr.io/dev/backend-team/my-service:v1.2.3`
+- Target: `brightcloudprod-def456.azurecr.io/prod/backend-team/my-service:v1.2.3`
 
 ### 2. Promote PR to Dev
 Common for merging PR builds to development environment.
@@ -29,6 +30,7 @@ Common for merging PR builds to development environment.
 - name: Promote PR to Dev
   uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
   with:
+    team-name: 'frontend-team'
     image-name: 'my-service'
     source-tag: 'pr-123-abc1234'
     target-tag: 'dev-abc1234'
@@ -38,8 +40,8 @@ Common for merging PR builds to development environment.
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/pr/my-service:pr-123-abc1234`
-- Target: `brightcloudnonprod-abc123.azurecr.io/dev/my-service:dev-abc1234`
+- Source: `brightcloudnonprod-abc123.azurecr.io/pr/frontend-team/my-service:pr-123-abc1234`
+- Target: `brightcloudnonprod-abc123.azurecr.io/dev/frontend-team/my-service:dev-abc1234`
 
 ### 3. Promote Same Registry
 For promotions within the same registry (e.g., dev → perf, perf → preproduction).
@@ -51,6 +53,7 @@ For promotions within the same registry (e.g., dev → perf, perf → preproduct
     registry: 'brightcloudnonprod-abc123.azurecr.io'
     source-environment: 'dev'
     target-environment: 'perf'
+    team-name: 'platform-team'
     image-name: 'my-service'
     source-tag: 'v1.2.3'
     azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -59,8 +62,8 @@ For promotions within the same registry (e.g., dev → perf, perf → preproduct
 ```
 
 **What it does:**
-- Source: `brightcloudnonprod-abc123.azurecr.io/dev/my-service:v1.2.3`
-- Target: `brightcloudnonprod-abc123.azurecr.io/perf/my-service:v1.2.3`
+- Source: `brightcloudnonprod-abc123.azurecr.io/dev/platform-team/my-service:v1.2.3`
+- Target: `brightcloudnonprod-abc123.azurecr.io/perf/platform-team/my-service:v1.2.3`
 
 ## 🔧 Advanced Action
 For complete control over all parameters.
@@ -73,6 +76,7 @@ For complete control over all parameters.
     target-registry: 'brightcloudprod-def456.azurecr.io'
     source-environment: 'perf'
     target-environment: 'preproduction'
+    team-name: 'api-team'
     image-name: 'my-service'
     source-tag: 'v1.2.3'
     target-tag: 'v1.2.3-prod'
@@ -116,6 +120,7 @@ jobs:
       - name: Promote to Production
         uses: DigitalInnovation/acr-image-promotion-action/promote-to-production@v1
         with:
+          team-name: 'backend-team'
           image-name: 'my-service'
           source-tag: ${{ inputs.version }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -158,6 +163,7 @@ jobs:
       - name: Promote PR to Dev
         uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
         with:
+          team-name: 'frontend-team'
           image-name: 'my-service'
           source-tag: 'pr-${{ steps.pr.outputs.number }}-${{ github.sha }}'
           target-tag: 'dev-${{ github.sha }}'
@@ -202,6 +208,7 @@ jobs:
           registry: 'brightcloudnonprod-abc123.azurecr.io'
           source-environment: 'dev'
           target-environment: 'perf'
+          team-name: 'platform-team'
           image-name: 'my-service'
           source-tag: ${{ inputs.source-tag }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -228,6 +235,7 @@ jobs:
           target-registry: 'brightcloudprod-def456.azurecr.io'
           source-environment: 'perf'
           target-environment: 'preproduction'
+          team-name: 'platform-team'
           image-name: 'my-service'
           source-tag: ${{ inputs.source-tag }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -253,6 +261,7 @@ jobs:
           registry: 'brightcloudprod-def456.azurecr.io'
           source-environment: 'preproduction'
           target-environment: 'production'
+          team-name: 'platform-team'
           image-name: 'my-service'
           source-tag: ${{ inputs.source-tag }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -274,8 +283,8 @@ All actions inherit the same security features:
 
 | Action | Use Case | Source | Target | Best For |
 |--------|----------|--------|--------|----------|
-| `promote-to-production` | Deploy to prod | `nonprod/dev` | `prod/prod` | Production releases |
-| `promote-pr-to-dev` | Merge PR | `nonprod/pr` | `nonprod/dev` | CI/CD integration |
+| `promote-to-production` | Deploy to prod | `nonprod/dev/team-name` | `prod/prod/team-name` | Production releases |
+| `promote-pr-to-dev` | Merge PR | `nonprod/pr/team-name` | `nonprod/dev/team-name` | CI/CD integration |
 | `promote-same-registry` | Environment progression | Same registry | Same registry | Testing phases |
 | Advanced action | Custom scenarios | Any registry/env | Any registry/env | Complex workflows |
 
@@ -315,6 +324,7 @@ PR → Dev → Feature Testing
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
+| `team-name` | Team name for image organization | ✅ | |
 | `image-name` | Image name (no registry/env prefix) | ✅ | |
 | `source-tag` | Source image tag | ✅ | |
 | `target-tag` | Target image tag | ❌ | `source-tag` |
@@ -351,7 +361,12 @@ Enable debug logging:
 - name: Promote with debug
   uses: DigitalInnovation/acr-image-promotion-action/promote-to-production@v1
   with:
-    # ... your inputs
+    team-name: 'backend-team'
+    image-name: 'my-service'
+    source-tag: 'v1.2.3'
+    azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+    azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+    azure-subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     dry-run: 'true'  # Safe to test with
 ```
 

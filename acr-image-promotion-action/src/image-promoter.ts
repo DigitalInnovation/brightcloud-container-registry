@@ -15,6 +15,7 @@ export interface PromotionConfig {
   targetRegistry: string;
   sourceEnvironment: string;
   targetEnvironment: string;
+  teamName: string;
   imageName: string;
   sourceTag: string;
   targetTag: string;
@@ -26,8 +27,8 @@ export class ImagePromoter {
   constructor(private credential: TokenCredential) {}
 
   async promote(config: PromotionConfig): Promise<PromotionResult> {
-    const sourceImage = `${config.sourceRegistry}/${config.sourceEnvironment}/${config.imageName}:${config.sourceTag}`;
-    const targetImage = `${config.targetRegistry}/${config.targetEnvironment}/${config.imageName}:${config.targetTag}`;
+    const sourceImage = `${config.sourceRegistry}/${config.sourceEnvironment}/${config.teamName}/${config.imageName}:${config.sourceTag}`;
+    const targetImage = `${config.targetRegistry}/${config.targetEnvironment}/${config.teamName}/${config.imageName}:${config.targetTag}`;
 
     core.info(`🔍 Verifying source image exists: ${sourceImage}`);
     
@@ -117,7 +118,7 @@ export class ImagePromoter {
       'acr', 'import',
       '--name', targetRegistry,
       '--source', sourceImage,
-      '--image', `${config.targetEnvironment}/${config.imageName}:${config.targetTag}`,
+      '--image', `${config.targetEnvironment}/${config.teamName}/${config.imageName}:${config.targetTag}`,
       '--force' // Always use force for import as we've already validated
     ];
 

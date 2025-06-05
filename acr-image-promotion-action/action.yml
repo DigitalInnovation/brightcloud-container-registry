@@ -15,8 +15,11 @@ inputs:
   target-environment:
     description: 'Target environment (dev, perf, preproduction, production)'
     required: true
+  team-name:
+    description: 'Team name for image organization and access control'
+    required: true
   image-name:
-    description: 'Name of the image to promote (without registry/environment prefix)'
+    description: 'Name of the image to promote (without registry/environment/team prefix)'
     required: true
   source-tag:
     description: 'Source image tag to promote'

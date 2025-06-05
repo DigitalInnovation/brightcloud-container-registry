@@ -8,6 +8,7 @@ interface PromotionInputs {
   targetRegistry: string;
   sourceEnvironment: string;
   targetEnvironment: string;
+  teamName: string;
   imageName: string;
   sourceTag: string;
   targetTag: string;
@@ -26,6 +27,7 @@ async function run(): Promise<void> {
       targetRegistry: core.getInput('target-registry', { required: true }),
       sourceEnvironment: core.getInput('source-environment', { required: true }),
       targetEnvironment: core.getInput('target-environment', { required: true }),
+      teamName: core.getInput('team-name', { required: true }),
       imageName: core.getInput('image-name', { required: true }),
       sourceTag: core.getInput('source-tag', { required: true }),
       targetTag: core.getInput('target-tag') || core.getInput('source-tag', { required: true }),
@@ -37,8 +39,8 @@ async function run(): Promise<void> {
     };
 
     core.info('🚀 Starting ACR image promotion...');
-    core.info(`Source: ${inputs.sourceRegistry}/${inputs.sourceEnvironment}/${inputs.imageName}:${inputs.sourceTag}`);
-    core.info(`Target: ${inputs.targetRegistry}/${inputs.targetEnvironment}/${inputs.imageName}:${inputs.targetTag}`);
+    core.info(`Source: ${inputs.sourceRegistry}/${inputs.sourceEnvironment}/${inputs.teamName}/${inputs.imageName}:${inputs.sourceTag}`);
+    core.info(`Target: ${inputs.targetRegistry}/${inputs.targetEnvironment}/${inputs.teamName}/${inputs.imageName}:${inputs.targetTag}`);
 
     // Validate promotion request
     const validator = new PromotionValidator();
@@ -67,6 +69,7 @@ async function run(): Promise<void> {
       targetRegistry: inputs.targetRegistry,
       sourceEnvironment: inputs.sourceEnvironment,
       targetEnvironment: inputs.targetEnvironment,
+      teamName: inputs.teamName,
       imageName: inputs.imageName,
       sourceTag: inputs.sourceTag,
       targetTag: inputs.targetTag,
