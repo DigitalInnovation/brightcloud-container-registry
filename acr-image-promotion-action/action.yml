@@ -36,6 +36,13 @@ inputs:
   azure-subscription-id:
     description: 'Azure subscription ID'
     required: true
+  resource-group-name:
+    description: 'Azure resource group containing the container registry'
+    required: true
+  enable-team-identity-validation:
+    description: 'Enable team identity validation using OIDC token and registry permissions'
+    required: false
+    default: 'true'
   dry-run:
     description: 'Perform validation without actual promotion'
     required: false

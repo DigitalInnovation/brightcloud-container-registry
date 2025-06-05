@@ -18,7 +18,7 @@ inputs:
   nonprod-registry:
     description: 'Non-production registry URL'
     required: false
-    default: 'brightcloudnonprod-abc123.azurecr.io'
+    default: 'brightcloudnonprod.azurecr.io'
   azure-client-id:
     description: 'Azure service principal client ID (for OIDC)'
     required: true

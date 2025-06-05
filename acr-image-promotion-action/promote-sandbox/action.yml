@@ -1,22 +1,13 @@
-name: 'Promote Same Registry'
-description: 'Promotes container images between environments in the same registry'
+name: 'Promote Sandbox'
+description: 'Promotes container images within the sandbox registry for experimentation'
 author: 'BrightCloud Platform Team'
 
 inputs:
-  registry:
-    description: 'Registry URL (e.g., brightcloudnonprod.azurecr.io)'
-    required: true
-  source-environment:
-    description: 'Source environment (pr, dev, perf, preproduction, production)'
-    required: true
-  target-environment:
-    description: 'Target environment (dev, perf, preproduction, production)'
-    required: true
   team-name:
-    description: 'Team name that owns the image'
+    description: 'Team name for image organization'
     required: true
   image-name:
-    description: 'Name of the image to promote (without registry/environment/team prefix)'
+    description: 'Name of the container image'
     required: true
   source-tag:
     description: 'Source image tag to promote'
@@ -24,6 +15,10 @@ inputs:
   target-tag:
     description: 'Target image tag (defaults to source-tag if not provided)'
     required: false
+  sandbox-registry:
+    description: 'Sandbox registry URL'
+    required: false
+    default: 'brightcloudsandbox.azurecr.io'
   azure-client-id:
     description: 'Azure service principal client ID (for OIDC)'
     required: true
@@ -32,6 +27,9 @@ inputs:
     required: true
   azure-subscription-id:
     description: 'Azure subscription ID'
+    required: true
+  resource-group-name:
+    description: 'Azure resource group containing the container registry'
     required: true
   dry-run:
     description: 'Perform validation without actual promotion'
@@ -49,24 +47,21 @@ outputs:
   target-image:
     description: 'Full target image reference'
     value: ${{ steps.promote.outputs.target-image }}
-  promotion-result:
-    description: 'Result of the promotion operation'
-    value: ${{ steps.promote.outputs.result }}
   target-digest:
-    description: 'SHA256 digest of the promoted image'
+    description: 'Digest of the promoted image'
     value: ${{ steps.promote.outputs.target-digest }}
 
 runs:
-  using: 'composite'
+  using: composite
   steps:
-    - name: Promote Image Between Environments
+    - name: Promote Image in Sandbox
       id: promote
       uses: ../
       with:
-        source-registry: ${{ inputs.registry }}
-        target-registry: ${{ inputs.registry }}
-        source-environment: ${{ inputs.source-environment }}
-        target-environment: ${{ inputs.target-environment }}
+        source-registry: ${{ inputs.sandbox-registry }}
+        target-registry: ${{ inputs.sandbox-registry }}
+        source-environment: 'sandbox'
+        target-environment: 'sandbox'
         team-name: ${{ inputs.team-name }}
         image-name: ${{ inputs.image-name }}
         source-tag: ${{ inputs.source-tag }}
@@ -74,9 +69,6 @@ runs:
         azure-client-id: ${{ inputs.azure-client-id }}
         azure-tenant-id: ${{ inputs.azure-tenant-id }}
         azure-subscription-id: ${{ inputs.azure-subscription-id }}
+        resource-group-name: ${{ inputs.resource-group-name }}
         dry-run: ${{ inputs.dry-run }}
         force: ${{ inputs.force }}
-
-branding:
-  icon: 'refresh-cw'
-  color: 'purple'

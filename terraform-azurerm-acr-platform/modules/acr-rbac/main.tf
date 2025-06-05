@@ -1,17 +1,14 @@
 locals {
-  # Flatten team-environment-role combinations for easier iteration
-  team_role_assignments = flatten([
+  # Flatten team-environment combinations for scope map creation
+  team_environment_combinations = flatten([
     for team_key, team in var.teams : [
-      for env in team.environments : [
-        for role in team.roles : {
-          team_key         = team_key
-          team_name        = team.name
-          environment      = env
-          role             = role
-          principal_id     = team.principal_id
-          principal_type   = team.principal_type
-        }
-      ]
+      for env in team.environments : {
+        team_key         = team_key
+        team_name        = team.name
+        environment      = env
+        service_principal_id = team.service_principal_id
+        azure_ad_group_id   = team.azure_ad_group_id
+      }
     ]
   ])
 }
@@ -30,31 +27,55 @@ data "azurerm_container_registry_scope_map" "environment_scopes" {
   resource_group_name     = var.resource_group_name
 }
 
-# Create tokens for teams with repository-scoped permissions
-resource "azurerm_container_registry_token" "team_tokens" {
-  for_each                = var.teams
-  name                    = "${each.value.name}-token"
+# Create team-specific scope maps for repository access
+resource "azurerm_container_registry_scope_map" "team_scopes" {
+  for_each = {
+    for combo in local.team_environment_combinations :
+    "${combo.team_key}-${combo.environment}" => combo
+  }
+
+  name                    = "${each.value.team_name}-${each.value.environment}-scope"
+  container_registry_name = var.registry_name
+  resource_group_name     = var.resource_group_name
+
+  actions = [
+    "repositories/${each.value.environment}/${each.value.team_name}/**/content/read",
+    "repositories/${each.value.environment}/${each.value.team_name}/**/content/write",
+    "repositories/${each.value.environment}/${each.value.team_name}/**/content/delete",
+    "repositories/${each.value.environment}/${each.value.team_name}/**/metadata/read",
+    "repositories/${each.value.environment}/${each.value.team_name}/**/metadata/write"
+  ]
+}
+
+# Service Principal gets AcrPush role with team-specific scope map
+resource "azurerm_container_registry_token" "team_sp_tokens" {
+  for_each = var.teams
+  
+  name                    = "${each.value.name}-sp-token"
   container_registry_name = var.registry_name
   resource_group_name     = var.resource_group_name
   enabled                 = true
 
-  # Assign scope maps for environments the team has access to
-  scope_map_id = data.azurerm_container_registry_scope_map.environment_scopes[each.value.environments[0]].id
+  # Combine all environment scope maps for this team
+  scope_map_id = azurerm_container_registry_scope_map.team_scopes["${each.key}-${each.value.environments[0]}"].id
 }
 
-# Role assignments for teams at registry level
-resource "azurerm_role_assignment" "team_registry_roles" {
-  for_each = {
-    for assignment in local.team_role_assignments :
-    "${assignment.team_key}-${assignment.role}" => assignment
-  }
+# Azure AD Group gets AcrPull role for reading team images across all environments
+resource "azurerm_role_assignment" "team_group_read" {
+  for_each = var.teams
 
   scope                = data.azurerm_container_registry.acr.id
-  role_definition_name = each.value.role
-  principal_id         = each.value.principal_id
+  role_definition_name = "AcrPull"
+  principal_id         = each.value.azure_ad_group_id
+}
 
-  # Only assign registry-level roles once per team
-  count = index([for a in local.team_role_assignments : a.team_key if a.role == each.value.role], each.value.team_key) == 0 ? 1 : 0
+# Service Principal gets AcrPush role at registry level (scoped by tokens)
+resource "azurerm_role_assignment" "team_sp_push" {
+  for_each = var.teams
+
+  scope                = data.azurerm_container_registry.acr.id
+  role_definition_name = "AcrPush"
+  principal_id         = each.value.service_principal_id
 }
 
 # Custom role definition for ACR promotion

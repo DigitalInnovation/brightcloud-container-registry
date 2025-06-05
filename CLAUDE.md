@@ -7,13 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The BrightCloud Container Registry Platform implements a comprehensive Azure Container Registry (ACR) solution with three main components:
 
 ### 1. Terraform Infrastructure (`terraform-azurerm-acr-platform/`)
-- **Three-tier registry architecture**: sandbox, nonprod, prod with unique naming via SHA-based suffixes
+- **Three-tier registry architecture**: sandbox, nonprod, production with configurable domain names
 - **Modular design**: `acr-registry` (core infrastructure), `acr-rbac` (access control), `acr-network` (security)
 - **ABAC permissions**: Repository-scoped permissions using Azure's ABAC system for team isolation
-- **Environment-specific retention policies**: Different retention periods per environment (PR: 30 days, dev: 720 days, production: 3650 days)
+- **Environment-specific retention policies**: Different retention periods per environment (sandbox: 3 days, PR: 30 days, dev: 720 days, production: 3650 days)
 
 ### 2. GitHub Actions (`acr-image-promotion-action/`)
-- **Family of promotion actions**: Four specialized actions for different promotion scenarios
+- **Family of promotion actions**: Five specialized actions for different promotion scenarios
 - **TypeScript-based**: Uses Node.js 20 runtime with Azure SDK integration
 - **Strict validation**: Prevents image renaming during promotion to maintain security boundaries
 
@@ -26,8 +26,9 @@ The BrightCloud Container Registry Platform implements a comprehensive Azure Con
 All images follow the pattern: `{registry-url}/{environment}/{team-name}/{image-name}:{tag}`
 
 Examples:
-- `brightcloudnonprod-abc123.azurecr.io/dev/frontend-team/web-app:v1.2.3`
-- `brightcloudprod-def456.azurecr.io/prod/backend-team/api-service:v2.1.0`
+- `brightcloudsandbox.azurecr.io/sandbox/experimental-team/poc-service:v0.1.0`
+- `brightcloudnonprod.azurecr.io/dev/frontend-team/web-app:v1.2.3`
+- `brightcloudproduction.azurecr.io/production/backend-team/api-service:v2.1.0`
 
 ## Development Commands
 
@@ -55,8 +56,8 @@ npm run package
 
 ### Terraform Operations
 ```bash
-# Navigate to environment
-cd terraform-azurerm-acr-platform/environments/nonprod
+# Navigate to environment (sandbox, nonprod, or production)
+cd terraform-azurerm-acr-platform/environments/sandbox
 
 # Initialize Terraform
 terraform init
@@ -81,9 +82,10 @@ terraform fmt -recursive
 ## Architecture Patterns
 
 ### Promotion Flow
-1. **PR builds** → `nonprod/pr/team-name/service:pr-123-abc`
-2. **Dev deployment** → `nonprod/dev/team-name/service:v1.2.3`
-3. **Cross-registry promotion** → `prod/prod/team-name/service:v1.2.3`
+1. **Sandbox experimentation** → `sandbox/sandbox/experimental-team/service:experiment-456`
+2. **PR builds** → `nonprod/pr/team-name/service:pr-123-abc`
+3. **Dev deployment** → `nonprod/dev/team-name/service:v1.2.3`
+4. **Cross-registry promotion** → `production/production/team-name/service:v1.2.3`
 
 ### Team Access Model
 Teams are configured in Terraform with:

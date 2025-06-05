@@ -1,0 +1,71 @@
+# Sandbox ACR Configuration Example
+# Copy this file to terraform.tfvars and customize for your environment
+
+# Basic Configuration
+resource_group_name = "rg-brightcloud-acr-sandbox"
+location           = "North Europe"
+create_resource_group = true
+
+# Security Configuration (more relaxed for sandbox)
+public_network_access_enabled = true  # Open for experimentation
+retention_policy_days         = 3    # Shorter retention for cost optimization
+
+# Network Access (customize as needed)
+allowed_ip_ranges = [
+  "10.0.0.0/8",    # Private network
+  "203.0.113.0/24" # Example public IP range
+]
+
+# GitHub Actions Service Principal (replace with actual values)
+github_actions_sp_object_id  = "12345678-1234-1234-1234-123456789012"
+github_actions_principal_id  = "87654321-4321-4321-4321-210987654321"
+
+# Team Access Configuration for Sandbox
+teams = {
+  "frontend-team" = {
+    name           = "Frontend Development Team"
+    principal_id   = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    principal_type = "Group"
+    environments   = ["sandbox"]
+    roles          = ["AcrPush", "AcrPull"]
+  }
+  "backend-team" = {
+    name           = "Backend Development Team"
+    principal_id   = "ffffffff-gggg-hhhh-iiii-jjjjjjjjjjjj"
+    principal_type = "Group"
+    environments   = ["sandbox"]
+    roles          = ["AcrPush", "AcrPull"]
+  }
+  "platform-team" = {
+    name           = "Platform Team"
+    principal_id   = "kkkkkkkk-llll-mmmm-nnnn-oooooooooooo"
+    principal_type = "Group"
+    environments   = ["sandbox"]
+    roles          = ["Contributor"]
+  }
+  "experimental-team" = {
+    name           = "Experimental/POC Team"
+    principal_id   = "xxxxxxxx-yyyy-zzzz-aaaa-bbbbbbbbbbbb"
+    principal_type = "Group"
+    environments   = ["sandbox"]
+    roles          = ["AcrPush", "AcrPull"]
+  }
+}
+
+# Monitoring and Compute Access (minimal for sandbox)
+monitoring_principal_ids = [
+  "pppppppp-qqqq-rrrr-ssss-tttttttttttt" # Azure Monitor
+]
+
+compute_principal_ids = [
+  "uuuuuuuu-vvvv-wwww-xxxx-yyyyyyyyyyyy"  # Sandbox compute identity
+]
+
+# Private Networking (typically not needed for sandbox)
+# create_private_endpoint = false
+# virtual_network_name = null
+# vnet_resource_group_name = null
+# subnet_name = null
+# network_security_group_name = null
+# allowed_source_address_prefixes = []
+# create_application_security_group = false

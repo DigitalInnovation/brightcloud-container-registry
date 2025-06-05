@@ -10,8 +10,8 @@ describe('PromotionValidator', () => {
   describe('Image Name Validation', () => {
     it('should reject image renaming', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -37,8 +37,8 @@ describe('PromotionValidator', () => {
 
     it('should validate image name format', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -58,8 +58,8 @@ describe('PromotionValidator', () => {
 
     it('should reject empty image names', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -78,8 +78,8 @@ describe('PromotionValidator', () => {
     it('should reject overly long image names', async () => {
       const longName = 'a'.repeat(130);
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -99,8 +99,8 @@ describe('PromotionValidator', () => {
   describe('Team Name Validation', () => {
     it('should reject empty team names', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: '',
@@ -127,8 +127,8 @@ describe('PromotionValidator', () => {
 
       for (const teamName of invalidTeamNames) {
         const request = {
-          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceRegistry: 'brightcloudnonprod.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
           teamName: teamName,
@@ -162,8 +162,8 @@ describe('PromotionValidator', () => {
 
       for (const teamName of validTeamNames) {
         const request = {
-          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceRegistry: 'brightcloudnonprod.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
           teamName: teamName,
@@ -182,8 +182,8 @@ describe('PromotionValidator', () => {
     it('should reject overly long team names', async () => {
       const longName = 'a'.repeat(65);
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: longName,
@@ -212,8 +212,8 @@ describe('PromotionValidator', () => {
 
       for (const promotion of validPromotions) {
         const request = {
-          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceRegistry: 'brightcloudnonprod.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: promotion.from,
           targetEnvironment: promotion.to,
           teamName: 'test-team',
@@ -239,8 +239,8 @@ describe('PromotionValidator', () => {
 
       for (const promotion of invalidPromotions) {
         const request = {
-          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceRegistry: 'brightcloudnonprod.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: promotion.from,
           targetEnvironment: promotion.to,
           teamName: 'test-team',
@@ -258,8 +258,8 @@ describe('PromotionValidator', () => {
 
     it('should reject same source and target environments', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudnonprod.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'dev',
         teamName: 'test-team',
@@ -287,7 +287,7 @@ describe('PromotionValidator', () => {
       for (const registry of invalidRegistries) {
         const request = {
           sourceRegistry: registry,
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
           teamName: 'test-team',
@@ -306,8 +306,8 @@ describe('PromotionValidator', () => {
 
     it('should reject sandbox promotions', async () => {
       const request = {
-        sourceRegistry: 'brightcloudsandbox-xyz789.azurecr.io',
-        targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        sourceRegistry: 'brightcloudsandbox.azurecr.io',
+        targetRegistry: 'brightcloudnonprod.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'perf',
         teamName: 'test-team',
@@ -325,8 +325,8 @@ describe('PromotionValidator', () => {
 
     it('should reject backward promotions', async () => {
       const request = {
-        sourceRegistry: 'brightcloudprod-def456.azurecr.io',
-        targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        sourceRegistry: 'brightcloudproduction.azurecr.io',
+        targetRegistry: 'brightcloudnonprod.azurecr.io',
         sourceEnvironment: 'production',
         targetEnvironment: 'dev',
         teamName: 'test-team',
@@ -354,8 +354,8 @@ describe('PromotionValidator', () => {
 
       for (const tag of invalidTags) {
         const request = {
-          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceRegistry: 'brightcloudnonprod.azurecr.io',
+          targetRegistry: 'brightcloudproduction.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
           teamName: 'test-team',
@@ -373,8 +373,8 @@ describe('PromotionValidator', () => {
 
     it('should warn about latest tag usage', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -393,8 +393,8 @@ describe('PromotionValidator', () => {
   describe('Registry-Environment Compatibility', () => {
     it('should validate nonprod environments use nonprod registry', async () => {
       const request = {
-        sourceRegistry: 'brightcloudprod-def456.azurecr.io',
-        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceRegistry: 'brightcloudproduction.azurecr.io',
+        targetRegistry: 'brightcloudproduction.azurecr.io',
         sourceEnvironment: 'dev', // dev should use nonprod registry
         targetEnvironment: 'preproduction',
         teamName: 'test-team',
@@ -412,8 +412,8 @@ describe('PromotionValidator', () => {
 
     it('should validate prod environments use prod registry', async () => {
       const request = {
-        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
-        targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        sourceRegistry: 'brightcloudnonprod.azurecr.io',
+        targetRegistry: 'brightcloudnonprod.azurecr.io',
         sourceEnvironment: 'perf',
         targetEnvironment: 'production', // production should use prod registry
         teamName: 'test-team',

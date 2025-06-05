@@ -16,13 +16,12 @@ variable "supported_environments" {
 
 variable "teams" {
   type = map(object({
-    name           = string
-    principal_id   = string
-    principal_type = string # "User", "Group", "ServicePrincipal"
-    environments   = list(string)
-    roles          = list(string) # ["AcrPull", "AcrPush", "Contributor"]
+    name                    = string
+    service_principal_id    = string  # For automation/push access
+    azure_ad_group_id       = string  # For team member read access
+    environments           = list(string)
   }))
-  description = "Map of teams and their ACR access configuration"
+  description = "Map of teams with service principal for push and AD group for read access"
   default     = {}
   
   validation {
@@ -37,12 +36,10 @@ variable "teams" {
   
   validation {
     condition = alltrue([
-      for team in values(var.teams) : alltrue([
-        for role in team.roles : 
-        contains(["AcrPull", "AcrPush", "Contributor", "Reader"], role)
-      ])
+      for team in values(var.teams) : 
+      team.service_principal_id != "" && team.azure_ad_group_id != ""
     ])
-    error_message = "Team roles must be valid ACR role names."
+    error_message = "Both service_principal_id and azure_ad_group_id must be provided for each team."
   }
 }
 

@@ -1,0 +1,48 @@
+# Global code owners
+* @tn-cloud-9-app-framework
+
+# Terraform infrastructure code
+/terraform-azurerm-acr-platform/ @tn-cloud-9-app-framework @platform-security-team
+/terraform-azurerm-acr-platform/modules/ @tn-cloud-9-app-framework @infrastructure-team
+/terraform-azurerm-acr-platform/environments/production/ @tn-cloud-9-app-framework @platform-security-team @production-approvers
+
+# GitHub Actions and automation
+/.github/ @tn-cloud-9-app-framework @devops-team
+/acr-image-promotion-action/ @tn-cloud-9-app-framework @security-team
+
+# Backstage templates and configurations
+/backstage-acr-template/ @tn-cloud-9-app-framework @platform-team
+/catalog-info.yaml @tn-cloud-9-app-framework @platform-team
+
+# Security-related files
+/.security/ @platform-security-team @security-team
+/SECURITY.md @platform-security-team @security-team
+/.tfsec/ @platform-security-team @security-team
+/.checkov.yaml @platform-security-team @security-team
+
+# Documentation
+/docs/ @tn-cloud-9-app-framework @technical-writers
+/README.md @tn-cloud-9-app-framework @technical-writers
+/CONTRIBUTING.md @tn-cloud-9-app-framework @technical-writers
+/REFACTORING_PLAN.md @tn-cloud-9-app-framework
+
+# Configuration files
+/.eslintrc.js @tn-cloud-9-app-framework @frontend-team
+/.prettierrc @tn-cloud-9-app-framework @frontend-team
+/.tflint.hcl @tn-cloud-9-app-framework @infrastructure-team
+/.pre-commit-config.yaml @tn-cloud-9-app-framework @devops-team
+
+# Testing infrastructure
+/tests/ @tn-cloud-9-app-framework @qa-team
+/terratest/ @tn-cloud-9-app-framework @infrastructure-team @qa-team
+
+# Monitoring and observability
+/monitoring/ @tn-cloud-9-app-framework @sre-team @observability-team
+
+# Release and deployment
+/CHANGELOG.md @tn-cloud-9-app-framework @release-managers
+/.github/workflows/release.yml @tn-cloud-9-app-framework @release-managers @devops-team
+
+# Compliance and audit
+/compliance/ @platform-security-team @compliance-team @audit-team
+/policies/ @platform-security-team @compliance-team

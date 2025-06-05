@@ -1,6 +1,6 @@
 import * as core from '@actions/core';
 import { ImagePromoter } from './image-promoter';
-import { PromotionValidator } from './promotion-validator';
+import { PromotionValidator, SecurityValidationConfig } from './promotion-validator';
 import { AzureAuthenticator } from './azure-authenticator';
 
 interface PromotionInputs {
@@ -15,6 +15,8 @@ interface PromotionInputs {
   azureClientId: string;
   azureTenantId: string;
   azureSubscriptionId: string;
+  resourceGroupName: string;
+  enableTeamIdentityValidation: boolean;
   dryRun: boolean;
   force: boolean;
 }
@@ -34,6 +36,8 @@ async function run(): Promise<void> {
       azureClientId: core.getInput('azure-client-id', { required: true }),
       azureTenantId: core.getInput('azure-tenant-id', { required: true }),
       azureSubscriptionId: core.getInput('azure-subscription-id', { required: true }),
+      resourceGroupName: core.getInput('resource-group-name', { required: true }),
+      enableTeamIdentityValidation: core.getBooleanInput('enable-team-identity-validation'),
       dryRun: core.getBooleanInput('dry-run'),
       force: core.getBooleanInput('force')
     };
@@ -42,17 +46,7 @@ async function run(): Promise<void> {
     core.info(`Source: ${inputs.sourceRegistry}/${inputs.sourceEnvironment}/${inputs.teamName}/${inputs.imageName}:${inputs.sourceTag}`);
     core.info(`Target: ${inputs.targetRegistry}/${inputs.targetEnvironment}/${inputs.teamName}/${inputs.imageName}:${inputs.targetTag}`);
 
-    // Validate promotion request
-    const validator = new PromotionValidator();
-    const validationResult = await validator.validate(inputs);
-    
-    if (!validationResult.isValid) {
-      throw new Error(`Validation failed: ${validationResult.errors.join(', ')}`);
-    }
-
-    core.info('✅ Promotion validation passed');
-
-    // Authenticate with Azure
+    // Authenticate with Azure first (needed for security validation)
     const authenticator = new AzureAuthenticator();
     const credential = await authenticator.authenticate({
       clientId: inputs.azureClientId,
@@ -61,6 +55,28 @@ async function run(): Promise<void> {
     });
 
     core.info('✅ Azure authentication successful');
+
+    // Prepare security validation config
+    const securityConfig: SecurityValidationConfig | undefined = inputs.enableTeamIdentityValidation ? {
+      credential: credential,
+      subscriptionId: inputs.azureSubscriptionId,
+      resourceGroupName: inputs.resourceGroupName,
+      enableTeamIdentityValidation: true
+    } : undefined;
+
+    // Validate promotion request (includes security validation if enabled)
+    const validator = new PromotionValidator();
+    const validationResult = await validator.validate(inputs, securityConfig);
+    
+    if (!validationResult.isValid) {
+      throw new Error(`Validation failed: ${validationResult.errors.join(', ')}`);
+    }
+
+    if (validationResult.warnings.length > 0) {
+      validationResult.warnings.forEach(warning => core.warning(warning));
+    }
+
+    core.info('✅ Promotion validation passed');
 
     // Perform promotion
     const promoter = new ImagePromoter(credential);
