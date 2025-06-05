@@ -1,12 +1,28 @@
 locals {
   resource_group_name = var.create_resource_group ? azurerm_resource_group.rg[0].name : var.resource_group_name
 
-  # Generate a unique suffix for the ACR name based on resource group and location
-  acr_name_suffix = substr(sha256("${local.resource_group_name}-${var.location}"), 0, 8)
-  acr_name        = "${var.acr_name_prefix}${local.acr_name_suffix}"
+  # Generate registry name with proper validation
+  registry_name = var.registry_name != null ? var.registry_name : "${var.registry_name_prefix}${random_string.suffix.result}"
 
-  # Environment-specific retention policies
+  # Common tags merged with provided tags
+  common_tags = merge(
+    {
+      "Environment"    = var.environment
+      "ManagedBy"      = "Terraform"
+      "Project"        = "BrightCloud-ACR"
+      "CostCenter"     = var.cost_center
+      "BusinessUnit"   = var.business_unit
+      "CreatedDate"    = formatdate("YYYY-MM-DD", timestamp())
+    },
+    var.tags
+  )
+
+  # Environment-specific retention policies with validation
   retention_policies = {
+    sandbox = {
+      enabled = true
+      days    = 3
+    }
     pr = {
       enabled = true
       days    = 30
@@ -28,30 +44,87 @@ locals {
       days    = 3650
     }
   }
+
+  # Get retention policy for current environment
+  retention_policy = lookup(local.retention_policies, var.environment, {
+    enabled = var.retention_policy_enabled
+    days    = var.retention_policy_days
+  })
+
+  # Validate SKU compatibility with features
+  is_premium_sku = var.sku == "Premium"
+  
+  # Features requiring Premium SKU
+  premium_features = [
+    var.zone_redundancy_enabled,
+    var.trust_policy_enabled,
+    var.quarantine_policy_enabled,
+    length(var.georeplications) > 0,
+    var.encryption_enabled
+  ]
+  
+  has_premium_features = anytrue(local.premium_features)
 }
 
 data "azurerm_client_config" "current" {}
+
+# Random suffix for unique naming when registry_name is not provided
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# Validation checks
+resource "null_resource" "validation" {
+  lifecycle {
+    precondition {
+      condition = length(local.registry_name) <= 50 && length(local.registry_name) >= 5
+      error_message = "Registry name must be between 5 and 50 characters."
+    }
+    
+    precondition {
+      condition = can(regex("^[a-zA-Z0-9]*$", local.registry_name))
+      error_message = "Registry name can only contain alphanumeric characters."
+    }
+    
+    precondition {
+      condition = !local.has_premium_features || local.is_premium_sku
+      error_message = "Premium SKU is required for zone redundancy, trust policy, quarantine policy, geo-replication, or encryption features."
+    }
+    
+    precondition {
+      condition = contains(["Basic", "Standard", "Premium"], var.sku)
+      error_message = "SKU must be one of: Basic, Standard, Premium."
+    }
+    
+    precondition {
+      condition = contains(["sandbox", "pr", "dev", "perf", "preproduction", "production"], var.environment)
+      error_message = "Environment must be one of: sandbox, pr, dev, perf, preproduction, production."
+    }
+  }
+}
 
 resource "azurerm_resource_group" "rg" {
   count    = var.create_resource_group ? 1 : 0
   name     = var.resource_group_name
   location = var.location
-  tags     = var.tags
+  tags     = local.common_tags
 }
 
 # Container Registry
 resource "azurerm_container_registry" "acr" {
-  name                = local.acr_name
+  name                = local.registry_name
   resource_group_name = local.resource_group_name
   location            = var.location
-  sku                 = "Premium"
-  admin_enabled       = false
+  sku                 = var.sku
+  admin_enabled       = var.admin_enabled
 
   # Security settings
   public_network_access_enabled = var.public_network_access_enabled
-  anonymous_pull_enabled        = false
-  data_endpoint_enabled         = true
-  network_rule_bypass_option    = "AzureServices"
+  anonymous_pull_enabled        = var.anonymous_pull_enabled
+  data_endpoint_enabled         = var.data_endpoint_enabled
+  network_rule_bypass_option    = var.network_rule_bypass_option
   zone_redundancy_enabled       = var.zone_redundancy_enabled
   export_policy_enabled         = var.export_policy_enabled
 
@@ -60,29 +133,35 @@ resource "azurerm_container_registry" "acr" {
     type = "SystemAssigned"
   }
 
-  # Trust Policy for content signing
-  trust_policy {
-    enabled = var.trust_policy_enabled
+  # Trust Policy for content signing (Premium SKU only)
+  dynamic "trust_policy" {
+    for_each = local.is_premium_sku ? [1] : []
+    content {
+      enabled = var.trust_policy_enabled
+    }
   }
 
-  # Quarantine Policy for security scanning
-  quarantine_policy {
-    enabled = var.quarantine_policy_enabled
+  # Quarantine Policy for security scanning (Premium SKU only)
+  dynamic "quarantine_policy" {
+    for_each = local.is_premium_sku ? [1] : []
+    content {
+      enabled = var.quarantine_policy_enabled
+    }
   }
 
-  # Retention Policy - applied to all environments
+  # Retention Policy - use environment-specific settings
   retention_policy {
-    days    = var.retention_policy_days
-    enabled = var.retention_policy_enabled
+    days    = local.retention_policy.days
+    enabled = local.retention_policy.enabled
   }
 
-  # Geo-replication for disaster recovery
+  # Geo-replication for disaster recovery (Premium SKU only)
   dynamic "georeplications" {
-    for_each = var.georeplications
+    for_each = local.is_premium_sku ? var.georeplications : []
     content {
       location                = georeplications.value.location
       zone_redundancy_enabled = georeplications.value.zone_redundancy_enabled
-      tags                    = var.tags
+      tags                    = local.common_tags
     }
   }
 
@@ -120,20 +199,23 @@ resource "azurerm_container_registry" "acr" {
     }
   }
 
-  tags = var.tags
+  tags = local.common_tags
 
   lifecycle {
-    ignore_changes = [tags]
+    prevent_destroy = var.prevent_destroy
+    ignore_changes = var.ignore_changes
   }
+
+  depends_on = [null_resource.validation]
 }
 
 # User-assigned identity for encryption (if enabled)
 resource "azurerm_user_assigned_identity" "encryption" {
   count               = var.encryption_enabled ? 1 : 0
-  name                = "${local.acr_name}-encryption-identity"
+  name                = "${local.registry_name}-encryption-identity"
   resource_group_name = local.resource_group_name
   location            = var.location
-  tags                = var.tags
+  tags                = local.common_tags
 }
 
 # Enable ABAC (Attribute-Based Access Control) for repository-scoped permissions
