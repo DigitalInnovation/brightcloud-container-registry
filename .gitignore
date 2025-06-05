@@ -163,6 +163,7 @@ local/
 tmp/
 temp/
 .cache/
+.claude/
 
 # Platform Specific
 # =================
