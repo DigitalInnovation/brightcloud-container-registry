@@ -1,0 +1,240 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: acr-app-service-access
+  title: Azure Container Registry - App Service Access
+  description: Grant Azure App Services and managed identities pull access to specific container images
+  tags:
+    - azure
+    - container-registry
+    - acr
+    - app-service
+    - managed-identity
+spec:
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  type: platform
+
+  parameters:
+    - title: Team and Application Information
+      required:
+        - team_name
+        - app_service_name
+        - requestor_email
+      properties:
+        team_name:
+          title: Team Name
+          type: string
+          description: 'Your team name (must already have registry access)'
+          pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          ui:help: 'Select the team that owns the container images'
+        app_service_name:
+          title: Application/Service Name
+          type: string
+          description: 'Name of the application or service that needs image access'
+          pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          ui:help: 'This will be used to identify the access grant'
+        requestor_email:
+          title: Requestor Email
+          type: string
+          format: email
+          description: 'Your email address for notifications'
+
+    - title: Access Configuration
+      required:
+        - environment
+        - image_names
+        - managed_identity_id
+      properties:
+        environment:
+          title: Environment
+          type: string
+          description: 'Environment where the images are located'
+          enum:
+            - sandbox
+            - pr
+            - dev
+            - perf
+            - preproduction
+            - production
+          enumNames:
+            - 'Sandbox'
+            - 'Pull Request'
+            - 'Development'
+            - 'Performance'
+            - 'Pre-production'
+            - 'Production'
+        image_names:
+          title: Image Names
+          type: array
+          description: 'Specific images to grant access to (without registry/environment/team prefix)'
+          items:
+            type: string
+            pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          minItems: 1
+          ui:help: 'Use "*" to grant access to all team images in this environment'
+        managed_identity_id:
+          title: Managed Identity (Object ID)
+          type: string
+          description: 'Object ID of the managed identity that needs pull access'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          ui:help: 'Find this in Azure Portal → Managed Identities → Your Identity → Object ID'
+
+    - title: Alternative: Service Principal Access
+      description: 'Use this instead of managed identity if your app uses service principal authentication'
+      properties:
+        service_principal_id:
+          title: Service Principal (Object ID)
+          type: string
+          description: 'Object ID of service principal that needs pull access (alternative to managed identity)'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          ui:help: 'Use either managed identity OR service principal, not both'
+
+    - title: Access Justification
+      required:
+        - access_justification
+        - access_duration
+      properties:
+        access_justification:
+          title: Access Justification
+          type: string
+          description: 'Why does this application need access to these specific images?'
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+        access_duration:
+          title: Access Duration
+          type: string
+          description: 'How long will this access be needed?'
+          enum:
+            - temporary-days
+            - temporary-months
+            - ongoing-development
+            - production-long-term
+          enumNames:
+            - 'Temporary (days/weeks)'
+            - 'Temporary (months)'
+            - 'Ongoing development'
+            - 'Production long-term'
+
+    - title: Security Acknowledgment
+      required:
+        - security_acknowledgment
+      properties:
+        security_acknowledgment:
+          title: Security Acknowledgment
+          type: boolean
+          description: 'I acknowledge that I have the authority to grant access for the specified managed identity/service principal'
+          ui:widget: checkbox
+          const: true
+
+  steps:
+    - id: validate-team-access
+      name: Validate Team Access
+      action: brightcloud:validate-team-registry-access
+      input:
+        teamName: ${{ parameters.team_name }}
+        environment: ${{ parameters.environment }}
+        requestorEmail: ${{ parameters.requestor_email }}
+
+    - id: validate-identity-access
+      name: Validate Identity Access
+      action: brightcloud:validate-identity-access
+      input:
+        managedIdentityId: ${{ parameters.managed_identity_id }}
+        servicePrincipalId: ${{ parameters.service_principal_id }}
+        requestorEmail: ${{ parameters.requestor_email }}
+
+    - id: grant-image-access
+      name: Grant Image Access
+      action: github:actions:dispatch
+      input:
+        workflowId: grant-app-service-image-access.yml
+        repoUrl: github.com?repo=brightcloud-container-registry&owner=DigitalInnovation
+        branchOrTagName: main
+        workflowInputs:
+          team_name: ${{ parameters.team_name }}
+          app_service_name: ${{ parameters.app_service_name }}
+          environment: ${{ parameters.environment }}
+          image_names: ${{ parameters.image_names | join(',') }}
+          managed_identity_id: ${{ parameters.managed_identity_id || '' }}
+          service_principal_id: ${{ parameters.service_principal_id || '' }}
+          access_justification: ${{ parameters.access_justification }}
+          access_duration: ${{ parameters.access_duration }}
+          requestor_email: ${{ parameters.requestor_email }}
+
+    - id: create-access-documentation
+      name: Create Access Documentation
+      action: catalog:write
+      input:
+        repoContentsUrl: ${{ steps['grant-image-access'].output.repoContentsUrl }}
+        entity:
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ parameters.team_name }}-${{ parameters.app_service_name }}-acr-access
+            title: ${{ parameters.app_service_name | title }} - ACR Image Access
+            description: Container image pull access for ${{ parameters.app_service_name }}
+            tags:
+              - azure
+              - container-registry
+              - ${{ parameters.team_name }}
+              - ${{ parameters.app_service_name }}
+            annotations:
+              github.com/project-slug: DigitalInnovation/brightcloud-container-registry
+              azure.com/managed-identity-id: ${{ parameters.managed_identity_id }}
+              azure.com/service-principal-id: ${{ parameters.service_principal_id }}
+          spec:
+            type: acr-image-access
+            lifecycle: ${{ parameters.access_duration == 'production-long-term' && 'production' || 'experimental' }}
+            owner: ${{ parameters.team_name }}
+            system: ap-A2295
+            dependsOn:
+              - resource:${{ parameters.team_name }}-acr-access
+
+  output:
+    links:
+      - title: Image Access Request
+        url: ${{ steps['grant-image-access'].output.htmlUrl }}
+        icon: github
+      - title: Access Documentation
+        url: ${{ steps['create-access-documentation'].output.entityRef | parseEntityRef | backstage://catalog-graph }}
+        icon: catalog
+    text:
+      - title: Access Grant Summary
+        content: |
+          ## ✅ App Service Image Access Request Submitted
+
+          **Application**: ${{ parameters.app_service_name }}
+          **Team**: ${{ parameters.team_name }}
+          **Environment**: ${{ parameters.environment }}
+          **Images**: ${{ parameters.image_names | join(', ') }}
+
+          ### Access Details
+          {% if parameters.managed_identity_id %}
+          - **Identity Type**: Managed Identity
+          - **Identity ID**: ${{ parameters.managed_identity_id }}
+          {% endif %}
+          {% if parameters.service_principal_id %}
+          - **Identity Type**: Service Principal  
+          - **Identity ID**: ${{ parameters.service_principal_id }}
+          {% endif %}
+          - **Duration**: ${{ parameters.access_duration }}
+
+          ### What Happens Next
+          1. **Validation**: We'll verify you have access to the specified identity
+          2. **Access Grant**: Role assignments will be created automatically
+          3. **Notification**: You'll receive confirmation when access is ready
+
+          ### Image Access Patterns
+          Your application will have pull access to:
+          {% for image in parameters.image_names %}
+          - `registry.azurecr.io/{{ parameters.environment }}/{{ parameters.team_name }}/{{ image }}:*`
+          {% endfor %}
+
+          ### Using the Access
+          Your application can now pull images using:
+          - **Managed Identity**: Automatic authentication with Azure Container Registry
+          - **Service Principal**: Use client credentials authentication
+
+          Need help configuring image pulls? Check the [ACR Authentication Guide](https://docs.brightcloud.com/container-registry/authentication).

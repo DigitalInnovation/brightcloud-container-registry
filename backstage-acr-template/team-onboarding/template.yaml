@@ -1,0 +1,241 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: acr-team-onboarding
+  title: Azure Container Registry - Team Onboarding
+  description: Self-service onboarding for teams to get access to Azure Container Registry environments
+  tags:
+    - azure
+    - container-registry
+    - acr
+    - team-onboarding
+spec:
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  type: platform
+
+  parameters:
+    - title: Team Information
+      required:
+        - team_name
+        - team_contact_email
+        - business_justification
+      properties:
+        team_name:
+          title: Team Name
+          type: string
+          description: 'Unique team identifier (lowercase, alphanumeric, hyphens, underscores only)'
+          pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          maxLength: 64
+          ui:help: 'This will be used in image paths: registry.azurecr.io/{environment}/{team_name}/{image}'
+        team_contact_email:
+          title: Team Contact Email
+          type: string
+          format: email
+          description: 'Primary contact for registry access and notifications'
+        business_justification:
+          title: Business Justification
+          type: string
+          description: 'Brief description of why your team needs registry access'
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+
+    - title: Registry Access Requirements
+      required:
+        - environments
+        - azure_ad_group_id
+      properties:
+        environments:
+          title: Required Environments
+          type: array
+          description: 'Select environments your team needs access to'
+          items:
+            type: string
+            enum:
+              - sandbox
+              - nonprod
+              - production
+          uniqueItems: true
+          ui:widget: checkboxes
+          ui:help: 'Start with sandbox/nonprod for development. Production requires additional approval.'
+        azure_ad_group_id:
+          title: Azure AD Group (Object ID)
+          type: string
+          description: 'Azure AD Group Object ID for team members (pull access)'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+          ui:help: 'Find this in Azure Portal → Azure Active Directory → Groups → Your Group → Object ID'
+
+    - title: Service Principal Configuration
+      description: 'Provide service principals for automated access (CI/CD, deployments)'
+      properties:
+        sandbox_service_principal:
+          title: Sandbox Service Principal (Object ID)
+          type: string
+          description: 'Service principal for sandbox environment automation'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        nonprod_service_principal:
+          title: Non-Production Service Principal (Object ID)
+          type: string
+          description: 'Service principal for nonprod environment automation'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+        production_service_principal:
+          title: Production Service Principal (Object ID)
+          type: string
+          description: 'Service principal for production environment automation'
+          pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      dependencies:
+        sandbox_service_principal:
+          oneOf:
+            - properties:
+                environments:
+                  contains:
+                    const: sandbox
+        nonprod_service_principal:
+          oneOf:
+            - properties:
+                environments:
+                  contains:
+                    const: nonprod
+        production_service_principal:
+          oneOf:
+            - properties:
+                environments:
+                  contains:
+                    const: production
+
+    - title: Security Acknowledgment
+      required:
+        - security_acknowledgment
+        - data_classification
+      properties:
+        security_acknowledgment:
+          title: Security Acknowledgment
+          type: boolean
+          description: 'I acknowledge that I have the authority to grant access for the specified Azure AD group and service principals'
+          ui:widget: checkbox
+          const: true
+        data_classification:
+          title: Data Classification
+          type: string
+          description: 'What type of data will be stored in container images?'
+          enum:
+            - public
+            - internal
+            - confidential
+            - restricted
+          enumNames:
+            - 'Public - No sensitive data'
+            - 'Internal - Company internal data'
+            - 'Confidential - Sensitive business data'
+            - 'Restricted - Highly sensitive/regulated data'
+
+  steps:
+    - id: validate-inputs
+      name: Validate Access Rights
+      action: brightcloud:validate-team-access
+      input:
+        teamName: ${{ parameters.team_name }}
+        azureAdGroupId: ${{ parameters.azure_ad_group_id }}
+        servicePresidentialIds:
+          sandbox: ${{ parameters.sandbox_service_principal }}
+          nonprod: ${{ parameters.nonprod_service_principal }}
+          production: ${{ parameters.production_service_principal }}
+        requestorEmail: ${{ user.entity.spec.profile.email }}
+        environments: ${{ parameters.environments }}
+
+    - id: check-production-approval
+      name: Check Production Access Approval
+      if: ${{ 'production' in parameters.environments }}
+      action: brightcloud:require-production-approval
+      input:
+        teamName: ${{ parameters.team_name }}
+        requestorEmail: ${{ user.entity.spec.profile.email }}
+        businessJustification: ${{ parameters.business_justification }}
+        dataClassification: ${{ parameters.data_classification }}
+
+    - id: provision-team-access
+      name: Provision Team Registry Access
+      action: github:actions:dispatch
+      input:
+        workflowId: provision-team-registry-access.yml
+        repoUrl: github.com?repo=brightcloud-container-registry&owner=DigitalInnovation
+        branchOrTagName: main
+        workflowInputs:
+          team_name: ${{ parameters.team_name }}
+          environments: ${{ parameters.environments | join(',') }}
+          azure_ad_group_id: ${{ parameters.azure_ad_group_id }}
+          sandbox_service_principal: ${{ parameters.sandbox_service_principal || '' }}
+          nonprod_service_principal: ${{ parameters.nonprod_service_principal || '' }}
+          production_service_principal: ${{ parameters.production_service_principal || '' }}
+          requestor_email: ${{ user.entity.spec.profile.email }}
+          business_justification: ${{ parameters.business_justification }}
+          data_classification: ${{ parameters.data_classification }}
+
+    - id: create-documentation
+      name: Create Team Documentation
+      action: catalog:write
+      input:
+        repoContentsUrl: ${{ steps['provision-team-access'].output.repoContentsUrl }}
+        entity:
+          apiVersion: backstage.io/v1alpha1
+          kind: Resource
+          metadata:
+            name: ${{ parameters.team_name }}-acr-access
+            title: ${{ parameters.team_name | title }} - ACR Access
+            description: Azure Container Registry access for ${{ parameters.team_name }}
+            tags:
+              - azure
+              - container-registry
+              - ${{ parameters.team_name }}
+            annotations:
+              github.com/project-slug: DigitalInnovation/brightcloud-container-registry
+              azure.com/ad-group-id: ${{ parameters.azure_ad_group_id }}
+          spec:
+            type: acr-access
+            lifecycle: production
+            owner: ${{ parameters.team_name }}
+            system: ap-A2295
+            dependsOn:
+              - resource:brightcloud-acr-platform
+            providesApis: []
+
+  output:
+    links:
+      - title: Registry Access Request
+        url: ${{ steps['provision-team-access'].output.htmlUrl }}
+        icon: github
+      - title: Team ACR Documentation
+        url: ${{ steps['create-documentation'].output.entityRef | parseEntityRef | backstage://catalog-graph }}
+        icon: catalog
+    text:
+      - title: Next Steps
+        content: |
+          ## ✅ Team Registry Access Request Submitted
+
+          **Team Name**: ${{ parameters.team_name }}
+          **Environments**: ${{ parameters.environments | join(', ') }}
+          **Contact**: ${{ parameters.team_contact_email }}
+
+          ### What Happens Next
+          1. **Validation**: We'll verify you have access to the Azure AD group and service principals
+          2. **Provisioning**: Registry access will be configured automatically
+          3. **Notification**: You'll receive an email when access is ready
+
+          ### Your Repository Pattern
+          ```
+          Registry: [registry-url]
+          Pattern: {environment}/${{ parameters.team_name }}/{image-name}:{tag}
+          ```
+
+          ### Image Examples
+          {% for env in parameters.environments %}
+          - **{{ env | title }}**: `registry.azurecr.io/{{ env }}/${{ parameters.team_name }}/my-app:v1.0.0`
+          {% endfor %}
+
+          ### Follow-up Actions Available
+          - **Add App Service Access**: Grant managed identities pull access to specific images
+          - **Configure CI/CD**: Set up GitHub Actions workflows for image builds and promotions
+          - **Request Additional Environments**: Expand access as your team grows
+
+          Need help? Contact the Platform Team or check the [ACR Documentation](https://docs.brightcloud.com/container-registry).
