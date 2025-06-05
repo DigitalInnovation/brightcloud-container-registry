@@ -1,0 +1,117 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: terraform-azurerm-acr-platform
+  title: Azure Container Registry Platform
+  description: Terraform infrastructure for BrightCloud Azure Container Registry platform with multi-environment support
+  annotations:
+    github.com/project-slug: DigitalInnovation/terraform-azurerm-acr-platform
+    backstage.io/techdocs-ref: url:https://github.com/DigitalInnovation/terraform-azurerm-acr-platform
+    azure.com/acr-registry-nonprod: brightcloudnonprod-abc123.azurecr.io
+    azure.com/acr-registry-prod: brightcloudprod-def456.azurecr.io
+    azure.com/acr-registry-sandbox: brightcloudsandbox-xyz789.azurecr.io
+    sonarqube.org/project-key: terraform-azurerm-acr-platform
+  links:
+    - url: https://github.com/DigitalInnovation/terraform-azurerm-acr-platform
+      title: GitHub Repository
+      icon: github
+    - url: https://portal.azure.com/#blade/HubsExtension/BrowseResource/resourceType/Microsoft.ContainerRegistry%2Fregistries
+      title: Azure Container Registries
+      icon: azure
+    - url: https://github.com/DigitalInnovation/acr-image-promotion-action
+      title: Image Promotion Action
+      icon: github
+  tags:
+    - terraform
+    - azure
+    - container-registry
+    - infrastructure
+    - platform
+    - brightcloud
+
+spec:
+  type: platform
+  owner: tn-cloud-9-app-framework
+  system: brightcloud-platform
+  lifecycle: production
+  providesApis:
+    - acr-platform-api
+  dependsOn:
+    - resource:azure-subscription
+    - resource:azure-key-vault
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: acr-platform-api
+  title: ACR Platform API
+  description: Platform interface for Azure Container Registry services
+spec:
+  type: terraform
+  lifecycle: production
+  owner: tn-cloud-9-app-framework
+  system: brightcloud-platform
+  definition: |
+    # ACR Platform Terraform Modules
+    
+    ## Registry Module
+    - Creates Azure Container Registry with Premium SKU
+    - Configures geo-replication and zone redundancy
+    - Enables ABAC repository-scoped permissions
+    - Sets up retention and security policies
+    
+    ## RBAC Module
+    - Configures team access with environment scoping
+    - Creates custom roles for image promotion
+    - Manages service principal permissions
+    
+    ## Network Module
+    - Creates private endpoints for secure access
+    - Configures network security groups
+    - Sets up DNS resolution for private access
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-nonprod
+  title: BrightCloud Non-Production ACR
+  description: Non-production Azure Container Registry for pr, dev, and perf environments
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-nonprod/providers/Microsoft.ContainerRegistry/registries/brightcloudnonprod-abc123
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: brightcloud-platform
+  lifecycle: production
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-prod
+  title: BrightCloud Production ACR
+  description: Production Azure Container Registry for preproduction and production environments
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-prod/providers/Microsoft.ContainerRegistry/registries/brightcloudprod-def456
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: brightcloud-platform
+  lifecycle: production
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-sandbox
+  title: BrightCloud Sandbox ACR
+  description: Sandbox Azure Container Registry for experimentation and POC work
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-sandbox/providers/Microsoft.ContainerRegistry/registries/brightcloudsandbox-xyz789
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: brightcloud-platform
+  lifecycle: experimental

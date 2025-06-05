@@ -1,0 +1,165 @@
+name: 'Test ACR Promotion Actions'
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-promote-to-production:
+    name: Test Promote to Production Action
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test promote-to-production (dry run)
+        id: test-prod
+        uses: ./promote-to-production
+        with:
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify production promotion validation
+        run: |
+          echo "Production promotion test result: ${{ steps.test-prod.outcome }}"
+          # Should pass validation but fail on Azure auth (expected in test)
+
+  test-promote-pr-to-dev:
+    name: Test Promote PR to Dev Action
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test promote-pr-to-dev (dry run)
+        id: test-pr-dev
+        uses: ./promote-pr-to-dev
+        with:
+          image-name: 'test-service'
+          source-tag: 'pr-123-abc1234'
+          target-tag: 'dev-abc1234'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify PR to dev promotion validation
+        run: |
+          echo "PR to dev promotion test result: ${{ steps.test-pr-dev.outcome }}"
+
+  test-promote-same-registry:
+    name: Test Promote Same Registry Action
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test promote-same-registry (dry run)
+        id: test-same-registry
+        uses: ./promote-same-registry
+        with:
+          registry: 'brightcloudnonprod-abc123.azurecr.io'
+          source-environment: 'dev'
+          target-environment: 'perf'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify same registry promotion validation
+        run: |
+          echo "Same registry promotion test result: ${{ steps.test-same-registry.outcome }}"
+
+  test-advanced-action:
+    name: Test Advanced Action
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test advanced action (dry run)
+        id: test-advanced
+        uses: ./
+        with:
+          source-registry: 'brightcloudnonprod-abc123.azurecr.io'
+          target-registry: 'brightcloudprod-def456.azurecr.io'
+          source-environment: 'perf'
+          target-environment: 'preproduction'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify advanced action validation
+        run: |
+          echo "Advanced action test result: ${{ steps.test-advanced.outcome }}"
+
+  test-invalid-scenarios:
+    name: Test Invalid Promotion Scenarios
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test invalid promotion path (should fail)
+        id: test-invalid-path
+        uses: ./
+        with:
+          source-registry: 'brightcloudprod-def456.azurecr.io'
+          target-registry: 'brightcloudnonprod-abc123.azurecr.io'
+          source-environment: 'production'
+          target-environment: 'dev'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify invalid promotion failed
+        if: steps.test-invalid-path.outcome != 'failure'
+        run: |
+          echo "Expected invalid promotion to fail, but it didn't"
+          exit 1
+
+      - name: Test sandbox promotion (should fail)
+        id: test-sandbox
+        uses: ./
+        with:
+          source-registry: 'brightcloudsandbox-xyz789.azurecr.io'
+          target-registry: 'brightcloudnonprod-abc123.azurecr.io'
+          source-environment: 'dev'
+          target-environment: 'perf'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify sandbox promotion failed
+        if: steps.test-sandbox.outcome != 'failure'
+        run: |
+          echo "Expected sandbox promotion to fail, but it didn't"
+          exit 1

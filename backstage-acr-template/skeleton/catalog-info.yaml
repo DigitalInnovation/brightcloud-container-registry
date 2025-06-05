@@ -1,0 +1,89 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: ${{ values.name }}
+  title: ${{ values.name }}
+  description: ${{ values.description }}
+  annotations:
+    github.com/project-slug: ${{ values.destination.owner + "/" + values.destination.repo }}
+    backstage.io/techdocs-ref: url:https://github.com/${{ values.destination.owner }}/${{ values.destination.repo }}
+    # ACR Integration Annotations
+    azure.com/acr-registry-nonprod: ${{ values.registry_url_nonprod }}
+    {%- if values.enable_production_promotion %}
+    azure.com/acr-registry-prod: ${{ values.registry_url_prod }}
+    {%- endif %}
+    {%- if values.acr_environment_tier == "sandbox" %}
+    azure.com/acr-registry-sandbox: ${{ values.registry_url_sandbox }}
+    {%- endif %}
+    azure.com/acr-image-name: ${{ values.name }}
+    azure.com/acr-supported-environments: ${{ values.initial_environments | join(",") }}
+    # Container Configuration
+    container.port: '${{ values.container_port }}'
+  links:
+    - url: https://github.com/${{ values.destination.owner }}/${{ values.destination.repo }}
+      title: GitHub Repository
+      icon: github
+    - url: https://${{ values.registry_url_nonprod }}
+      title: Non-Prod Container Registry
+      icon: docker
+    {%- if values.enable_production_promotion %}
+    - url: https://${{ values.registry_url_prod }}
+      title: Production Container Registry
+      icon: docker
+    {%- endif %}
+  tags:
+    - ${{ values.language }}
+    - ${{ values.framework }}
+    - brightcloud
+    - azure-container-registry
+
+spec:
+  type: service
+  owner: ${{ values.owner }}
+  lifecycle: development
+  system: brightcloud-platform
+  providesApis:
+    - ${{ values.name }}-api
+  dependsOn:
+    - component:brightcloud-acr-platform
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: ${{ values.name }}-api
+  title: ${{ values.name }} API
+  description: API specification for ${{ values.name }}
+spec:
+  type: openapi
+  lifecycle: development
+  owner: ${{ values.owner }}
+  system: brightcloud-platform
+  definition: |
+    openapi: 3.0.0
+    info:
+      title: ${{ values.name }} API
+      description: ${{ values.description }}
+      version: 1.0.0
+    servers:
+      - url: http://localhost:${{ values.container_port }}
+        description: Local development server
+    paths:
+      /health:
+        get:
+          summary: Health check endpoint
+          operationId: healthCheck
+          responses:
+            '200':
+              description: Service is healthy
+              content:
+                application/json:
+                  schema:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+                      timestamp:
+                        type: string
+                        format: date-time

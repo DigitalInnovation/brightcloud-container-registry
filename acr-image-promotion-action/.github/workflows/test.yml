@@ -1,0 +1,95 @@
+name: 'Test ACR Image Promotion Action'
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build action
+        run: npm run build
+
+      - name: Test action validation (dry run)
+        id: test-validation
+        uses: ./
+        with:
+          source-registry: 'brightcloudnonprod-abc123.azurecr.io'
+          target-registry: 'brightcloudprod-def456.azurecr.io'
+          source-environment: 'dev'
+          target-environment: 'preproduction'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Test invalid promotion path
+        id: test-invalid
+        uses: ./
+        with:
+          source-registry: 'brightcloudnonprod-abc123.azurecr.io'
+          target-registry: 'brightcloudprod-def456.azurecr.io'
+          source-environment: 'production'
+          target-environment: 'dev'
+          image-name: 'test-service'
+          source-tag: 'v1.0.0'
+          azure-client-id: 'test-client-id'
+          azure-tenant-id: 'test-tenant-id'
+          azure-subscription-id: 'test-subscription-id'
+          dry-run: 'true'
+        continue-on-error: true
+
+      - name: Verify invalid promotion failed
+        if: steps.test-invalid.outcome != 'failure'
+        run: |
+          echo "Expected invalid promotion to fail, but it didn't"
+          exit 1
+
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check formatting
+        run: npx prettier --check src/**/*.ts
+
+      - name: Run ESLint
+        run: npm run lint
