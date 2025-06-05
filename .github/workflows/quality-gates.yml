@@ -1,0 +1,508 @@
+name: Quality Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  TERRAFORM_VERSION: '1.6.0'
+  GO_VERSION: '1.21'
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  checks: write
+  statuses: write
+
+jobs:
+  # Code Quality Gate
+  code-quality:
+    name: Code Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install TypeScript dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: TypeScript Lint
+        working-directory: acr-image-promotion-action
+        run: |
+          npm run lint 2>&1 | tee lint-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::TypeScript linting failed"
+            exit 1
+          fi
+
+      - name: TypeScript Format Check
+        working-directory: acr-image-promotion-action
+        run: |
+          npm run format:check 2>&1 | tee format-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::TypeScript formatting check failed"
+            exit 1
+          fi
+
+      - name: TypeScript Type Check
+        working-directory: acr-image-promotion-action
+        run: |
+          npm run type-check 2>&1 | tee typecheck-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::TypeScript type checking failed"
+            exit 1
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Format Check
+        run: |
+          terraform fmt -check -recursive terraform-azurerm-acr-platform/ 2>&1 | tee tf-format-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::Terraform formatting check failed"
+            exit 1
+          fi
+
+      - name: Terraform Validate
+        run: |
+          cd terraform-azurerm-acr-platform
+          find . -name "*.tf" -exec dirname {} \; | sort -u | while read dir; do
+            if [ -f "$dir/main.tf" ] || [ -f "$dir/variables.tf" ]; then
+              echo "Validating $dir"
+              cd "$dir"
+              terraform init -backend=false
+              terraform validate
+              cd - > /dev/null
+            fi
+          done
+
+      - name: Upload Quality Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-quality-results
+          path: |
+            acr-image-promotion-action/*-results.txt
+            tf-format-results.txt
+          retention-days: 7
+
+  # Security Quality Gate
+  security-quality:
+    name: Security Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: code-quality
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Security Audit (npm)
+        working-directory: acr-image-promotion-action
+        run: |
+          npm audit --audit-level=moderate --json > security-audit.json || true
+          npm audit --audit-level=moderate
+          
+          # Check for high/critical vulnerabilities
+          if npm audit --audit-level=high --json | jq -e '.vulnerabilities | length > 0' > /dev/null; then
+            echo "::error::High or critical security vulnerabilities found"
+            exit 1
+          fi
+
+      - name: Snyk Security Test
+        if: env.SNYK_TOKEN != ''
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --file=acr-image-promotion-action/package.json
+
+      - name: Secret Detection
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: TFSec Security Scan
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform-azurerm-acr-platform
+          format: sarif
+          soft_fail: true
+
+      - name: Checkov Security Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform-azurerm-acr-platform
+          soft_fail: true
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+
+      - name: Upload Security Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-quality-results
+          path: |
+            acr-image-promotion-action/security-audit.json
+            results.sarif
+            checkov-results.sarif
+          retention-days: 30
+
+  # Testing Quality Gate
+  testing-quality:
+    name: Testing Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: code-quality
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install TypeScript dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: TypeScript Unit Tests
+        working-directory: acr-image-promotion-action
+        run: |
+          npm run test:ci 2>&1 | tee test-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::TypeScript unit tests failed"
+            exit 1
+          fi
+
+      - name: TypeScript Coverage Check
+        working-directory: acr-image-promotion-action
+        run: |
+          # Extract coverage percentage
+          COVERAGE=$(npm run test:coverage --silent | grep -o 'Lines.*: [0-9.]*%' | grep -o '[0-9.]*' || echo "0")
+          echo "Code coverage: ${COVERAGE}%"
+          
+          # Enforce minimum coverage threshold (85%)
+          if [ $(echo "$COVERAGE < 85" | bc -l) -eq 1 ]; then
+            echo "::error::Code coverage ${COVERAGE}% is below required threshold of 85%"
+            exit 1
+          fi
+          
+          echo "::notice::Code coverage ${COVERAGE}% meets quality gate"
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: terraform-azurerm-acr-platform/test/go.sum
+
+      - name: Terraform Tests
+        working-directory: terraform-azurerm-acr-platform/test
+        env:
+          # Use test subscription to avoid affecting production
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID_TEST }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+        run: |
+          go mod download
+          
+          # Run validation tests (don't require Azure resources)
+          go test -v -run TestVariableValidation ./... 2>&1 | tee terraform-test-results.txt
+          
+          # Run unit tests if we have test credentials
+          if [ -n "$ARM_SUBSCRIPTION_ID" ]; then
+            echo "Running integration tests..."
+            go test -v -timeout 30m ./... 2>&1 | tee -a terraform-test-results.txt
+          else
+            echo "::warning::Skipping integration tests - no test credentials provided"
+          fi
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: testing-quality-results
+          path: |
+            acr-image-promotion-action/test-results.txt
+            acr-image-promotion-action/coverage/
+            terraform-azurerm-acr-platform/test/terraform-test-results.txt
+          retention-days: 7
+
+  # Infrastructure Quality Gate
+  infrastructure-quality:
+    name: Infrastructure Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: code-quality
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Initialize TFLint
+        run: tflint --init
+
+      - name: Run TFLint
+        run: |
+          cd terraform-azurerm-acr-platform
+          tflint --config=../.tflint.hcl --recursive --format=compact 2>&1 | tee tflint-results.txt
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::TFLint found issues"
+            exit 1
+          fi
+
+      - name: Terraform Documentation Check
+        run: |
+          # Install terraform-docs
+          curl -sSLo terraform-docs.tar.gz https://github.com/terraform-docs/terraform-docs/releases/download/v0.16.0/terraform-docs-v0.16.0-linux-amd64.tar.gz
+          tar -xzf terraform-docs.tar.gz
+          chmod +x terraform-docs
+          
+          # Check if module READMEs are up to date
+          cd terraform-azurerm-acr-platform
+          for module in modules/*/; do
+            if [ -f "$module/main.tf" ]; then
+              echo "Checking documentation for $module"
+              ./terraform-docs markdown table --output-check "$module"
+            fi
+          done
+
+      - name: Terraform Plan Validation
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID_TEST }}
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+        run: |
+          cd terraform-azurerm-acr-platform/examples/complete
+          
+          # Skip if no test credentials
+          if [ -z "$ARM_SUBSCRIPTION_ID" ]; then
+            echo "::warning::Skipping Terraform plan - no test credentials provided"
+            exit 0
+          fi
+          
+          # Create test tfvars
+          cat > test.tfvars << EOF
+          github_actions_sp_object_id = "00000000-0000-0000-0000-000000000000"
+          frontend_team_principal_id = "00000000-0000-0000-0000-000000000000"
+          backend_team_principal_id = "00000000-0000-0000-0000-000000000000"
+          platform_team_principal_id = "00000000-0000-0000-0000-000000000000"
+          security_team_principal_id = "00000000-0000-0000-0000-000000000000"
+          private_endpoint_subnet_id = "/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vnet/subnets/test-subnet"
+          private_dns_zone_id = "/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/test-rg/providers/Microsoft.Network/privateDnsZones/privatelink.azurecr.io"
+          log_analytics_workspace_id = "/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-workspace"
+          alert_action_group_id = "/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/test-rg/providers/Microsoft.Insights/actionGroups/test-alerts"
+          EOF
+          
+          terraform init
+          terraform plan -var-file=test.tfvars -out=test.tfplan
+          
+          # Validate plan output
+          terraform show -json test.tfplan > plan.json
+          
+          # Check for security compliance
+          if ! jq -e '.planned_values.root_module.resources[] | select(.type == "azurerm_container_registry") | .values.admin_enabled == false' plan.json; then
+            echo "::error::Registry admin user must be disabled"
+            exit 1
+          fi
+          
+          if ! jq -e '.planned_values.root_module.resources[] | select(.type == "azurerm_container_registry") | .values.public_network_access_enabled == false' plan.json; then
+            echo "::error::Registry public access must be disabled"
+            exit 1
+          fi
+
+      - name: Upload Infrastructure Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-quality-results
+          path: |
+            terraform-azurerm-acr-platform/tflint-results.txt
+            terraform-azurerm-acr-platform/examples/complete/plan.json
+          retention-days: 7
+
+  # Performance Quality Gate
+  performance-quality:
+    name: Performance Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: testing-quality
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Build Performance Test
+        working-directory: acr-image-promotion-action
+        run: |
+          # Measure build time
+          start_time=$(date +%s)
+          npm run build
+          end_time=$(date +%s)
+          
+          build_duration=$((end_time - start_time))
+          echo "Build duration: ${build_duration} seconds"
+          
+          # Enforce build time SLA (should complete within 60 seconds)
+          if [ $build_duration -gt 60 ]; then
+            echo "::error::Build time ${build_duration}s exceeds 60s threshold"
+            exit 1
+          fi
+          
+          echo "::notice::Build performance meets quality gate (${build_duration}s)"
+
+      - name: Bundle Size Check
+        working-directory: acr-image-promotion-action
+        run: |
+          # Check bundle size
+          if [ -f "dist/index.js" ]; then
+            bundle_size=$(stat -f%z dist/index.js 2>/dev/null || stat -c%s dist/index.js)
+            bundle_size_mb=$((bundle_size / 1024 / 1024))
+            
+            echo "Bundle size: ${bundle_size_mb}MB"
+            
+            # Enforce bundle size limit (5MB for GitHub Actions)
+            if [ $bundle_size_mb -gt 5 ]; then
+              echo "::error::Bundle size ${bundle_size_mb}MB exceeds 5MB limit"
+              exit 1
+            fi
+            
+            echo "::notice::Bundle size meets quality gate (${bundle_size_mb}MB)"
+          fi
+
+  # Quality Gate Summary
+  quality-gate-summary:
+    name: Quality Gate Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, security-quality, testing-quality, infrastructure-quality, performance-quality]
+    if: always()
+    
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: quality-results
+
+      - name: Generate Quality Report
+        run: |
+          echo "# Quality Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check job results
+          CODE_QUALITY="${{ needs.code-quality.result }}"
+          SECURITY_QUALITY="${{ needs.security-quality.result }}"
+          TESTING_QUALITY="${{ needs.testing-quality.result }}"
+          INFRASTRUCTURE_QUALITY="${{ needs.infrastructure-quality.result }}"
+          PERFORMANCE_QUALITY="${{ needs.performance-quality.result }}"
+          
+          echo "## Gate Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Add results with emojis
+          echo "| Quality Gate | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | $([ "$CODE_QUALITY" = "success" ] && echo "✅ PASS" || echo "❌ FAIL") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Quality | $([ "$SECURITY_QUALITY" = "success" ] && echo "✅ PASS" || echo "❌ FAIL") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testing Quality | $([ "$TESTING_QUALITY" = "success" ] && echo "✅ PASS" || echo "❌ FAIL") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Infrastructure Quality | $([ "$INFRASTRUCTURE_QUALITY" = "success" ] && echo "✅ PASS" || echo "❌ FAIL") |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Quality | $([ "$PERFORMANCE_QUALITY" = "success" ] && echo "✅ PASS" || echo "❌ FAIL") |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "$CODE_QUALITY" = "success" && "$SECURITY_QUALITY" = "success" && "$TESTING_QUALITY" = "success" && "$INFRASTRUCTURE_QUALITY" = "success" && "$PERFORMANCE_QUALITY" = "success" ]]; then
+            echo "## ✅ Overall Status: PASS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All quality gates have passed. This change is ready for review and merge." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Overall Status: FAIL" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "One or more quality gates have failed. Please review the failed checks and address the issues." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "- Review quality gate results above" >> $GITHUB_STEP_SUMMARY
+          echo "- Download artifacts for detailed analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- Address any failing quality gates" >> $GITHUB_STEP_SUMMARY
+          echo "- Re-run quality gates after fixes" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Quality Gates
+        run: |
+          # Fail the workflow if any critical quality gates failed
+          if [[ "${{ needs.code-quality.result }}" != "success" || "${{ needs.security-quality.result }}" != "success" || "${{ needs.testing-quality.result }}" != "success" ]]; then
+            echo "::error::Critical quality gates failed"
+            exit 1
+          fi
+          
+          # Warning for non-critical failures
+          if [[ "${{ needs.infrastructure-quality.result }}" != "success" || "${{ needs.performance-quality.result }}" != "success" ]]; then
+            echo "::warning::Non-critical quality gates failed - review recommended"
+          fi
