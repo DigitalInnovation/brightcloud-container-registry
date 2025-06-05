@@ -19,6 +19,9 @@ jobs:
   terraform-validate:
     name: Terraform Validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -31,10 +34,12 @@ jobs:
 
       - name: Terraform Format Check
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: terraform fmt -check -recursive
 
       - name: Validate Modules
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           for dir in modules/*/; do
             echo "Validating $dir"
@@ -46,6 +51,7 @@ jobs:
 
       - name: Validate Environments
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           for dir in environments/*/; do
             echo "Validating $dir"
@@ -58,6 +64,9 @@ jobs:
   terraform-lint:
     name: Terraform Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -76,10 +85,12 @@ jobs:
 
       - name: Init TFLint
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: tflint --init
 
       - name: Run TFLint on Modules
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           for dir in modules/*/; do
             echo "Linting $dir"
@@ -90,6 +101,7 @@ jobs:
 
       - name: Run TFLint on Environments
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           for dir in environments/*/; do
             echo "Linting $dir"
@@ -101,6 +113,10 @@ jobs:
   terraform-security:
     name: Terraform Security
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     
     steps:
       - name: Checkout
@@ -114,13 +130,16 @@ jobs:
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
-        if: success() || failure()
+        if: always()
         with:
           sarif_file: results.sarif
 
   terraform-docs:
     name: Terraform Docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -135,6 +154,7 @@ jobs:
           git-push: "false"
 
       - name: Check for changes
+        shell: bash
         run: |
           if ! git diff --exit-code; then
             echo "Documentation is out of date. Please run 'terraform-docs' and commit the changes."
