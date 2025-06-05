@@ -20,6 +20,7 @@ spec:
         - name
         - description
         - owner
+        - team_name
       properties:
         name:
           title: Service Name
@@ -40,6 +41,12 @@ spec:
           ui:options:
             catalogFilter:
               kind: [Group, User]
+        team_name:
+          title: Team Name
+          type: string
+          description: 'Team name for ACR image organization and access control'
+          pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          ui:help: 'Must contain only lowercase letters, numbers, periods, hyphens, and underscores. Used for image path organization.'
     
     - title: Technology Stack
       required:
@@ -155,6 +162,7 @@ spec:
           name: ${{ parameters.name }}
           description: ${{ parameters.description }}
           owner: ${{ parameters.owner }}
+          team_name: ${{ parameters.team_name }}
           language: ${{ parameters.language }}
           framework: ${{ parameters.framework }}
           acr_environment_tier: ${{ parameters.acr_environment_tier }}

@@ -1,0 +1,177 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: brightcloud-container-registry
+  title: BrightCloud Container Registry Platform
+  description: Comprehensive platform for managing Azure Container Registry infrastructure with automated image promotion and team-based access control
+  annotations:
+    github.com/project-slug: DigitalInnovation/brightcloud-container-registry
+    backstage.io/techdocs-ref: url:https://github.com/DigitalInnovation/brightcloud-container-registry
+    azure.com/acr-registry-nonprod: brightcloudnonprod-abc123.azurecr.io
+    azure.com/acr-registry-prod: brightcloudprod-def456.azurecr.io
+    azure.com/acr-registry-sandbox: brightcloudsandbox-xyz789.azurecr.io
+    sonarqube.org/project-key: brightcloud-container-registry
+  links:
+    - url: https://github.com/DigitalInnovation/brightcloud-container-registry
+      title: GitHub Repository
+      icon: github
+    - url: https://portal.azure.com/#blade/HubsExtension/BrowseResource/resourceType/Microsoft.ContainerRegistry%2Fregistries
+      title: Azure Container Registries
+      icon: azure
+    - url: https://github.com/DigitalInnovation/brightcloud-container-registry/tree/main/acr-image-promotion-action
+      title: Image Promotion Actions
+      icon: github
+    - url: https://github.com/DigitalInnovation/brightcloud-container-registry/tree/main/terraform-azurerm-acr-platform
+      title: Terraform Infrastructure
+      icon: github
+    - url: https://github.com/DigitalInnovation/brightcloud-container-registry/tree/main/backstage-acr-template
+      title: Backstage Template
+      icon: github
+  tags:
+    - terraform
+    - azure
+    - container-registry
+    - docker
+    - github-actions
+    - backstage
+    - infrastructure
+    - platform
+    - brightcloud
+    - team-based-access
+
+spec:
+  type: platform
+  lifecycle: production
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  providesApis:
+    - acr-platform-api
+    - acr-promotion-api
+  dependsOn:
+    - resource:azure-subscription
+    - resource:azure-key-vault
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: acr-platform-api
+  title: ACR Platform Infrastructure API
+  description: Terraform-based infrastructure API for Azure Container Registry platform
+spec:
+  type: terraform
+  lifecycle: production
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  definition: |
+    # ACR Platform Terraform Modules
+    
+    ## Registry Module
+    - Creates Azure Container Registry with Premium SKU
+    - Configures geo-replication and zone redundancy
+    - Enables ABAC repository-scoped permissions with team-based access
+    - Sets up retention and security policies
+    
+    ## RBAC Module
+    - Configures team access with environment and repository scoping
+    - Creates custom roles for image promotion
+    - Manages service principal permissions
+    
+    ## Network Module
+    - Creates private endpoints for secure access
+    - Configures network security groups
+    - Sets up DNS resolution for private access
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: API
+metadata:
+  name: acr-promotion-api
+  title: ACR Image Promotion API
+  description: GitHub Actions API for promoting container images between environments
+spec:
+  type: github-actions
+  lifecycle: production
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  definition: |
+    # ACR Image Promotion Actions
+    
+    ## Quick Start Actions
+    - promote-to-production: Most common dev → prod promotion
+    - promote-pr-to-dev: Merge PR builds to development
+    - promote-same-registry: Environment progression within same registry
+    
+    ## Advanced Action
+    - Full control promotion with arbitrary source/target configurations
+    
+    ## Team-Based Features
+    - Enforces team-based image organization: registry/env/team/image
+    - Validates team name consistency (no cross-team promotions)
+    - Supports ABAC repository-scoped permissions
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-nonprod
+  title: BrightCloud Non-Production ACR
+  description: Non-production Azure Container Registry for pr, dev, and perf environments with team-based organization
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-nonprod/providers/Microsoft.ContainerRegistry/registries/brightcloudnonprod-abc123
+    azure.com/supported-environments: pr,dev,perf
+    azure.com/access-model: team-based-abac
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  lifecycle: production
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-prod
+  title: BrightCloud Production ACR
+  description: Production Azure Container Registry for preproduction and production environments with team-based organization
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-prod/providers/Microsoft.ContainerRegistry/registries/brightcloudprod-def456
+    azure.com/supported-environments: preproduction,production
+    azure.com/access-model: team-based-abac
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  lifecycle: production
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Resource
+metadata:
+  name: brightcloud-acr-sandbox
+  title: BrightCloud Sandbox ACR
+  description: Sandbox Azure Container Registry for experimentation and POC work with team-based organization
+  annotations:
+    azure.com/resource-id: /subscriptions/{subscription-id}/resourceGroups/rg-brightcloud-acr-sandbox/providers/Microsoft.ContainerRegistry/registries/brightcloudsandbox-xyz789
+    azure.com/supported-environments: sandbox
+    azure.com/access-model: team-based-abac
+spec:
+  type: acr
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  lifecycle: experimental
+
+---
+apiVersion: backstage.io/v1alpha1
+kind: Template
+metadata:
+  name: brightcloud-service-acr
+  title: BrightCloud Service with ACR
+  description: Software template for creating services with team-based Azure Container Registry integration
+  annotations:
+    backstage.io/template-origin: file:./backstage-acr-template/template.yaml
+spec:
+  type: service
+  owner: tn-cloud-9-app-framework
+  system: ap-A2295
+  lifecycle: production
