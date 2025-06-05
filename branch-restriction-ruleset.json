@@ -1,0 +1,17 @@
+{
+  "name": "Branch Name Restrictions",
+  "target": "branch", 
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/*"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "creation"
+    }
+  ],
+  "bypass_actors": []
+}
