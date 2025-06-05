@@ -1,0 +1,305 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.2.3)'
+        required: true
+        type: string
+      pre_release:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '20'
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            IS_PRERELEASE="${{ github.event.inputs.pre_release }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/}"
+            # Check if version contains pre-release identifiers
+            if [[ "$VERSION" =~ -(alpha|beta|rc|dev) ]]; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
+          fi
+          
+          # Validate version format
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "::notice::Releasing version $VERSION (prerelease: $IS_PRERELEASE)"
+
+      - name: Check Tag Exists
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+            echo "::error::Tag ${{ steps.version.outputs.version }} already exists"
+            exit 1
+          fi
+
+  test:
+    name: Run Tests
+    uses: ./.github/workflows/terraform-quality.yml
+    secrets: inherit
+
+  test-actions:
+    name: Run Action Tests
+    uses: ./.github/workflows/action-test.yml
+    secrets: inherit
+
+  build-terraform-docs:
+    name: Build Terraform Documentation
+    runs-on: ubuntu-latest
+    needs: [validate]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate Terraform Documentation
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          # Generate documentation for all modules
+          for module in modules/*/; do
+            echo "Generating docs for $module"
+            terraform-docs markdown table --output-file README.md "$module"
+          done
+
+      - name: Upload Documentation
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-docs
+          path: terraform-azurerm-acr-platform/
+          retention-days: 7
+
+  build-action:
+    name: Build Action
+    runs-on: ubuntu-latest
+    needs: [validate, test-actions]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Update version
+        working-directory: acr-image-promotion-action
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          npm version "${VERSION#v}" --no-git-tag-version
+
+      - name: Build and package
+        working-directory: acr-image-promotion-action
+        run: npm run package
+
+      - name: Upload built action
+        uses: actions/upload-artifact@v3
+        with:
+          name: packaged-action
+          path: |
+            acr-image-promotion-action/dist/
+            acr-image-promotion-action/action.yml
+            acr-image-promotion-action/package.json
+          retention-days: 7
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [validate, test, test-actions, build-terraform-docs, build-action]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: release-artifacts
+
+      - name: Generate Release Notes
+        id: release-notes
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          echo "# Release $VERSION" > release_notes.md
+          echo "" >> release_notes.md
+          
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "## Changes since $PREVIOUS_TAG" >> release_notes.md
+            echo "" >> release_notes.md
+            
+            # Get commits since last tag
+            git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..HEAD >> release_notes.md
+          else
+            echo "## Initial Release" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "This is the initial release of the BrightCloud Container Registry Platform." >> release_notes.md
+          fi
+          
+          echo "" >> release_notes.md
+          echo "## Components" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Terraform ACR Platform" >> release_notes.md
+          echo "- Azure Container Registry modules with enterprise security" >> release_notes.md
+          echo "- Environment-specific retention policies" >> release_notes.md
+          echo "- ABAC repository-scoped permissions" >> release_notes.md
+          echo "- Comprehensive testing with Terratest" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### ACR Image Promotion Action" >> release_notes.md
+          echo "- Family of GitHub Actions for secure image promotion" >> release_notes.md
+          echo "- Team-based access control and validation" >> release_notes.md
+          echo "- Support for multiple promotion scenarios" >> release_notes.md
+          echo "- Comprehensive error handling and logging" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Backstage Templates" >> release_notes.md
+          echo "- Service scaffolding with ACR integration" >> release_notes.md
+          echo "- Team-based organization and workflows" >> release_notes.md
+          echo "" >> release_notes.md
+          
+          if [ "${{ needs.validate.outputs.is_prerelease }}" == "true" ]; then
+            echo "## ⚠️ Pre-release Notice" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "This is a pre-release version and may contain experimental features." >> release_notes.md
+            echo "Not recommended for production use." >> release_notes.md
+          fi
+
+      - name: Create GitHub Tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.validate.outputs.version }}" -m "Release ${{ needs.validate.outputs.version }}"
+          git push origin "${{ needs.validate.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const releaseNotes = fs.readFileSync('release_notes.md', 'utf8');
+            
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: '${{ needs.validate.outputs.version }}',
+              name: 'Release ${{ needs.validate.outputs.version }}',
+              body: releaseNotes,
+              draft: false,
+              prerelease: ${{ needs.validate.outputs.is_prerelease }}
+            });
+            
+            console.log(`Created release: ${release.data.html_url}`);
+
+      - name: Upload Release Assets
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            const releaseId = await github.rest.repos.getLatestRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo
+            }).then(r => r.data.id);
+            
+            // Upload packaged action
+            const actionZip = 'release-artifacts/packaged-action.zip';
+            if (fs.existsSync(actionZip)) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: releaseId,
+                name: 'acr-image-promotion-action.zip',
+                data: fs.readFileSync(actionZip)
+              });
+            }
+
+  update-major-tag:
+    name: Update Major Version Tag
+    runs-on: ubuntu-latest
+    needs: [validate, create-release]
+    if: needs.validate.outputs.is_prerelease == 'false'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update Major Version Tag
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          MAJOR_VERSION=$(echo "$VERSION" | sed 's/v\([0-9]*\)\..*/v\1/')
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Create or update major version tag
+          git tag -fa "$MAJOR_VERSION" -m "Update $MAJOR_VERSION to $VERSION"
+          git push origin "$MAJOR_VERSION" --force
+
+  notify:
+    name: Notify Release
+    runs-on: ubuntu-latest
+    needs: [validate, create-release]
+    if: always()
+    
+    steps:
+      - name: Notify Success
+        if: needs.create-release.result == 'success'
+        run: |
+          echo "::notice::Successfully released ${{ needs.validate.outputs.version }}"
+          echo "Release is available at: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.version }}"
+
+      - name: Notify Failure
+        if: needs.create-release.result == 'failure'
+        run: |
+          echo "::error::Release ${{ needs.validate.outputs.version }} failed"
+          exit 1

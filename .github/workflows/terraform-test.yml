@@ -1,0 +1,254 @@
+name: Terraform Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'terraform-azurerm-acr-platform/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'terraform-azurerm-acr-platform/**'
+  schedule:
+    # Run tests daily at 2 AM UTC to catch drift
+    - cron: '0 2 * * *'
+
+env:
+  TF_VERSION: '1.6.0'
+  GO_VERSION: '1.21'
+  ARM_USE_OIDC: true
+  ARM_USE_AZUREAD: true
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  terraform-test:
+    name: Terraform Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.ref == 'refs/heads/main'
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        test-suite:
+          - unit-tests
+          - integration-tests
+        
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: terraform-azurerm-acr-platform/test/go.sum
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('terraform-azurerm-acr-platform/test/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Go dependencies
+        working-directory: terraform-azurerm-acr-platform/test
+        run: |
+          go mod download
+          go mod tidy
+
+      - name: Run Unit Tests
+        if: matrix.test-suite == 'unit-tests'
+        working-directory: terraform-azurerm-acr-platform/test
+        run: |
+          make test-unit
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_environment: test
+          TF_VAR_location: "North Europe"
+
+      - name: Run Integration Tests
+        if: matrix.test-suite == 'integration-tests'
+        working-directory: terraform-azurerm-acr-platform/test
+        run: |
+          make test-integration
+        env:
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          TF_VAR_environment: test
+          TF_VAR_location: "North Europe"
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-test-results-${{ matrix.test-suite }}
+          path: |
+            terraform-azurerm-acr-platform/test/coverage/
+            terraform-azurerm-acr-platform/test/*.xml
+          retention-days: 30
+
+      - name: Comment Test Results on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'terraform-azurerm-acr-platform/test/coverage/junit.xml';
+            
+            if (fs.existsSync(path)) {
+              const testResults = fs.readFileSync(path, 'utf8');
+              const comment = `## Terraform Test Results (${{ matrix.test-suite }})
+              
+              <details>
+              <summary>Test Summary</summary>
+              
+              \`\`\`xml
+              ${testResults}
+              \`\`\`
+              </details>`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+  terraform-drift-detection:
+    name: Terraform Drift Detection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check for Configuration Drift
+        working-directory: terraform-azurerm-acr-platform
+        run: |
+          # Check each environment for drift
+          for env in sandbox nonprod production; do
+            if [ -d "environments/$env" ]; then
+              echo "Checking drift for $env environment..."
+              cd "environments/$env"
+              
+              terraform init -backend-config="key=acr-$env.tfstate"
+              
+              # Run plan and capture output
+              if ! terraform plan -detailed-exitcode -out=drift.tfplan; then
+                echo "::warning::Drift detected in $env environment"
+                terraform show drift.tfplan
+              else
+                echo "::notice::No drift detected in $env environment"
+              fi
+              
+              cd ../..
+            fi
+          done
+
+      - name: Create Drift Issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Terraform Configuration Drift Detected';
+            const body = `
+            ## Terraform Drift Detection Alert
+            
+            Configuration drift has been detected in one or more environments.
+            
+            **Detected on**: ${new Date().toISOString()}
+            **Workflow**: [${context.workflow}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            
+            Please review the drift and take appropriate action:
+            1. If the changes are expected, update the Terraform configuration
+            2. If the changes are unexpected, investigate and remediate
+            3. Consider implementing additional drift prevention measures
+            
+            ### Next Steps
+            - [ ] Review the drift details in the workflow logs
+            - [ ] Determine if changes are intentional or need remediation
+            - [ ] Update Terraform configuration if needed
+            - [ ] Apply changes to bring infrastructure back to desired state
+            `;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['infrastructure', 'drift-detection', 'urgent']
+            });
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [terraform-test]
+    if: always() && github.event_name == 'pull_request'
+    
+    steps:
+      - name: Download Test Results
+        uses: actions/download-artifact@v3
+        with:
+          path: test-results
+
+      - name: Generate Test Summary
+        run: |
+          echo "## Terraform Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check test results
+          if find test-results -name "*.xml" -type f | head -1 | xargs -I {} test -f {}; then
+            echo "✅ Tests completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Tests failed or incomplete" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Unit test results: Available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Integration test results: Available in artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- Coverage reports: Available in artifacts" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check Test Status
+        run: |
+          if [ "${{ needs.terraform-test.result }}" != "success" ]; then
+            echo "::error::Terraform tests failed. Please review the test results before merging."
+            exit 1
+          fi

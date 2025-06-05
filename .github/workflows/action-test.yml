@@ -1,0 +1,301 @@
+name: Action Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'acr-image-promotion-action/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'acr-image-promotion-action/**'
+
+env:
+  NODE_VERSION: '20'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Run linting
+        working-directory: acr-image-promotion-action
+        run: npm run lint
+
+      - name: Run type checking
+        working-directory: acr-image-promotion-action
+        run: npm run type-check
+
+      - name: Run tests with coverage
+        working-directory: acr-image-promotion-action
+        run: npm run test:ci
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./acr-image-promotion-action/coverage/lcov.info
+          flags: action-tests
+          name: acr-image-promotion-action
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: action-test-results
+          path: |
+            acr-image-promotion-action/coverage/
+            acr-image-promotion-action/coverage/junit.xml
+          retention-days: 30
+
+      - name: Comment Coverage on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'acr-image-promotion-action/coverage/coverage-summary.json';
+            
+            if (fs.existsSync(path)) {
+              const coverage = JSON.parse(fs.readFileSync(path, 'utf8'));
+              const { lines, functions, branches, statements } = coverage.total;
+              
+              const comment = `## Action Test Coverage
+              
+              | Metric | Coverage | Status |
+              |--------|----------|--------|
+              | Lines | ${lines.pct}% | ${lines.pct >= 80 ? '✅' : '❌'} |
+              | Functions | ${functions.pct}% | ${functions.pct >= 80 ? '✅' : '❌'} |
+              | Branches | ${branches.pct}% | ${branches.pct >= 80 ? '✅' : '❌'} |
+              | Statements | ${statements.pct}% | ${statements.pct >= 80 ? '✅' : '❌'} |
+              
+              Minimum coverage threshold: 80%`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    environment: testing
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Build action
+        working-directory: acr-image-promotion-action
+        run: npm run package
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Test Action - Dry Run
+        uses: ./acr-image-promotion-action
+        with:
+          source-registry: ${{ secrets.TEST_SOURCE_REGISTRY }}
+          source-image: 'test/integration-team/test-service'
+          source-tag: 'test-tag'
+          target-registry: ${{ secrets.TEST_TARGET_REGISTRY }}
+          target-environment: 'dev'
+          team-name: 'integration-team'
+          dry-run: 'true'
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Test Action - Invalid Input (Should Fail)
+        id: invalid-test
+        continue-on-error: true
+        uses: ./acr-image-promotion-action
+        with:
+          source-registry: 'invalid-registry'
+          source-image: 'invalid/image'
+          source-tag: 'invalid-tag'
+          target-registry: 'invalid-target'
+          target-environment: 'invalid-env'
+          team-name: 'invalid-team'
+          dry-run: 'true'
+
+      - name: Verify Invalid Input Failed
+        if: steps.invalid-test.outcome == 'success'
+        run: |
+          echo "::error::Integration test should have failed with invalid inputs"
+          exit 1
+
+  build-and-package:
+    name: Build and Package
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Build and package
+        working-directory: acr-image-promotion-action
+        run: npm run package
+
+      - name: Check for uncommitted changes
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Uncommitted changes detected after packaging. Please run 'npm run package' and commit the changes."
+            git diff
+            exit 1
+          fi
+
+      - name: Upload packaged action
+        uses: actions/upload-artifact@v3
+        with:
+          name: packaged-action
+          path: acr-image-promotion-action/dist/
+          retention-days: 7
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: acr-image-promotion-action/package-lock.json
+
+      - name: Install dependencies
+        working-directory: acr-image-promotion-action
+        run: npm ci
+
+      - name: Run security audit
+        working-directory: acr-image-promotion-action
+        run: npm audit --audit-level=high
+
+      - name: Run CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          languages: javascript
+          source-root: acr-image-promotion-action/src
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >- 
+            p/security-audit
+            p/typescript
+            p/nodejs
+          generateSarif: "1"
+
+      - name: Upload SARIF file
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: [test, integration-test, build-and-package, security-scan]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Action Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Unit tests
+          if [ "${{ needs.test.result }}" == "success" ]; then
+            echo "✅ Unit tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Unit tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Integration tests
+          if [ "${{ needs.integration-test.result }}" == "success" ]; then
+            echo "✅ Integration tests passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.integration-test.result }}" == "skipped" ]; then
+            echo "⏭️ Integration tests skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Integration tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Build and package
+          if [ "${{ needs.build-and-package.result }}" == "success" ]; then
+            echo "✅ Build and package succeeded" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Build and package failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Security scan
+          if [ "${{ needs.security-scan.result }}" == "success" ]; then
+            echo "✅ Security scan passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Security scan failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check Overall Status
+        if: |
+          needs.test.result != 'success' ||
+          needs.build-and-package.result != 'success' ||
+          needs.security-scan.result != 'success' ||
+          (needs.integration-test.result != 'success' && needs.integration-test.result != 'skipped')
+        run: |
+          echo "::error::One or more test jobs failed. Please review the results before merging."
+          exit 1
