@@ -1,0 +1,141 @@
+repos:
+  # General formatting and linting
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+
+  # Terraform formatting and linting
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.86.0
+    hooks:
+      - id: terraform_fmt
+        args:
+          - --args=-recursive
+      - id: terraform_validate
+        args:
+          - --hook-config=--retry-once-with-cleanup=true
+      - id: terraform_tflint
+        args:
+          - --args=--config=__GIT_WORKING_DIR__/.tflint.hcl
+      - id: terraform_docs
+        args:
+          - --hook-config=--path-to-file=README.md
+          - --hook-config=--add-to-existing-file=true
+          - --hook-config=--create-file-if-not-exist=true
+      - id: terraform_tfsec
+        args:
+          - --args=--config-file=__GIT_WORKING_DIR__/.tfsec/config.yml
+      - id: terraform_checkov
+        args:
+          - --args=--config-file=__GIT_WORKING_DIR__/.checkov.yaml
+
+  # TypeScript/JavaScript linting and formatting
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.56.0
+    hooks:
+      - id: eslint
+        files: \.(js|jsx|ts|tsx)$
+        types: [file]
+        additional_dependencies:
+          - '@typescript-eslint/eslint-plugin@^6.0.0'
+          - '@typescript-eslint/parser@^6.0.0'
+          - 'eslint-plugin-security@^1.7.1'
+          - 'eslint-plugin-jest@^27.6.0'
+          - 'eslint-plugin-import@^2.29.0'
+          - 'eslint-plugin-node@^11.1.0'
+          - 'eslint-config-prettier@^9.1.0'
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        files: \.(js|jsx|ts|tsx|json|yaml|yml|md)$
+
+  # Security scanning
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: 3.1.34
+    hooks:
+      - id: checkov
+        args: [--config-file=.checkov.yaml]
+        files: \.tf$
+
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint
+        args: [--config=.hadolint.yaml]
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: [--config-file=.yamllint.yaml]
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint
+        args: [--config=.markdownlint.yaml]
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+
+  # JSON schema validation
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.27.3
+    hooks:
+      - id: check-github-workflows
+      - id: check-github-actions
+      - id: check-azure-pipelines
+
+  # Commit message linting
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # License checking
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.4
+    hooks:
+      - id: insert-license
+        files: \.(js|jsx|ts|tsx|tf|py)$
+        args:
+          - --license-filepath
+          - .license-header.txt
+          - --comment-style
+          - //
+
+# Configuration for pre-commit itself
+default_stages: [commit]
+fail_fast: false
+default_language_version:
+  python: python3.11
+  node: 18.19.0
