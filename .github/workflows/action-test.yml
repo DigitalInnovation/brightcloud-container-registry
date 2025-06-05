@@ -52,7 +52,7 @@ jobs:
         run: npm run test:ci
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
           files: ./acr-image-promotion-action/coverage/lcov.info
           flags: action-tests
