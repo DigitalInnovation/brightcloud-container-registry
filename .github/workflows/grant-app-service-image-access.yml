@@ -1,0 +1,456 @@
+name: Grant App Service Image Access
+
+on:
+  workflow_dispatch:
+    inputs:
+      team_name:
+        description: 'Team name that owns the images'
+        required: true
+        type: string
+      app_service_name:
+        description: 'Application/service name requesting access'
+        required: true
+        type: string
+      environment:
+        description: 'Environment where images are located'
+        required: true
+        type: choice
+        options:
+          - sandbox
+          - pr
+          - dev
+          - perf
+          - preproduction
+          - production
+      image_names:
+        description: 'Comma-separated list of image names (or * for all)'
+        required: true
+        type: string
+      managed_identity_id:
+        description: 'Managed Identity Object ID'
+        required: false
+        type: string
+      service_principal_id:
+        description: 'Service Principal Object ID'
+        required: false
+        type: string
+      access_justification:
+        description: 'Justification for access'
+        required: true
+        type: string
+      access_duration:
+        description: 'Expected duration of access'
+        required: true
+        type: choice
+        options:
+          - temporary-days
+          - temporary-months
+          - ongoing-development
+          - production-long-term
+      requestor_email:
+        description: 'Email of person requesting access'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  validate-access-request:
+    name: Validate Access Request
+    runs-on: ubuntu-latest
+    outputs:
+      validation_passed: ${{ steps.validate.outputs.validation_passed }}
+      identity_type: ${{ steps.validate.outputs.identity_type }}
+      identity_id: ${{ steps.validate.outputs.identity_id }}
+      registry_name: ${{ steps.validate.outputs.registry_name }}
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate team has registry access
+        run: |
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          
+          # Determine registry based on environment
+          case $ENVIRONMENT in
+            sandbox)
+              REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_SANDBOX_REGISTRY_NAME }}"
+              ;;
+            pr|dev|perf|preproduction)
+              REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_NONPROD_REGISTRY_NAME }}"
+              ;;
+            production)
+              REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_PRODUCTION_REGISTRY_NAME }}"
+              ;;
+            *)
+              echo "❌ Invalid environment: $ENVIRONMENT"
+              exit 1
+              ;;
+          esac
+          
+          echo "Registry: $REGISTRY_NAME"
+          echo "registry_name=$REGISTRY_NAME" >> $GITHUB_ENV
+          
+          # Check if team has a scope map for this environment
+          SCOPE_MAP_EXISTS=$(az acr scope-map list --registry "$REGISTRY_NAME" --query "[?contains(name, '${ENVIRONMENT}') && contains(name, '${TEAM_NAME}')].name" -o tsv | wc -l)
+          
+          if [[ $SCOPE_MAP_EXISTS -eq 0 ]]; then
+            echo "❌ Team $TEAM_NAME does not have access to $ENVIRONMENT environment"
+            echo "Please onboard your team first using the team registry access flow"
+            exit 1
+          fi
+          
+          echo "✅ Team has valid access to $ENVIRONMENT environment"
+
+      - name: Validate identity access and ownership
+        id: validate-identity
+        run: |
+          MANAGED_ID="${{ github.event.inputs.managed_identity_id }}"
+          SP_ID="${{ github.event.inputs.service_principal_id }}"
+          
+          if [[ -n "$MANAGED_ID" && -n "$SP_ID" ]]; then
+            echo "❌ Cannot specify both managed identity and service principal"
+            exit 1
+          fi
+          
+          if [[ -z "$MANAGED_ID" && -z "$SP_ID" ]]; then
+            echo "❌ Must specify either managed identity or service principal"
+            exit 1
+          fi
+          
+          if [[ -n "$MANAGED_ID" ]]; then
+            echo "🔍 Validating managed identity access..."
+            
+            # Check if managed identity exists and requestor has access
+            if ! az identity show --ids "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourcegroups/*/providers/Microsoft.ManagedIdentity/userAssignedIdentities/*" --query "[?principalId=='$MANAGED_ID']" --output table 2>/dev/null | grep -q "$MANAGED_ID"; then
+              # Try direct lookup
+              IDENTITY_NAME=$(az ad sp show --id "$MANAGED_ID" --query "displayName" -o tsv 2>/dev/null || echo "")
+              if [[ -z "$IDENTITY_NAME" ]]; then
+                echo "❌ Managed identity not found or insufficient permissions: $MANAGED_ID"
+                echo "You must have access to view the managed identity to grant it registry access"
+                exit 1
+              fi
+            fi
+            
+            IDENTITY_NAME=$(az ad sp show --id "$MANAGED_ID" --query "displayName" -o tsv)
+            echo "✅ Managed identity validated: $IDENTITY_NAME ($MANAGED_ID)"
+            echo "identity_type=managed-identity" >> $GITHUB_OUTPUT
+            echo "identity_id=$MANAGED_ID" >> $GITHUB_OUTPUT
+            
+          elif [[ -n "$SP_ID" ]]; then
+            echo "🔍 Validating service principal access..."
+            
+            if ! az ad sp show --id "$SP_ID" --output none 2>/dev/null; then
+              echo "❌ Service principal not found or insufficient permissions: $SP_ID"
+              echo "You must have access to view the service principal to grant it registry access"
+              exit 1
+            fi
+            
+            SP_NAME=$(az ad sp show --id "$SP_ID" --query "displayName" -o tsv)
+            echo "✅ Service principal validated: $SP_NAME ($SP_ID)"
+            echo "identity_type=service-principal" >> $GITHUB_OUTPUT
+            echo "identity_id=$SP_ID" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate image names
+        run: |
+          IMAGE_NAMES="${{ github.event.inputs.image_names }}"
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          
+          if [[ "$IMAGE_NAMES" == "*" ]]; then
+            echo "✅ Wildcard access requested for all team images"
+            echo "Will grant access to: $ENVIRONMENT/$TEAM_NAME/*"
+          else
+            echo "🔍 Validating specific image names..."
+            IFS=',' read -ra IMAGE_ARRAY <<< "$IMAGE_NAMES"
+            
+            for IMAGE in "${IMAGE_ARRAY[@]}"; do
+              IMAGE=$(echo "$IMAGE" | tr -d ' ')  # Remove whitespace
+              
+              # Validate image name format
+              if [[ ! "$IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+                echo "❌ Invalid image name format: $IMAGE"
+                echo "Image names must be lowercase alphanumeric with hyphens, underscores, or periods"
+                exit 1
+              fi
+              
+              echo "✅ Image name format valid: $IMAGE"
+            done
+            
+            echo "Will grant access to specific images: $IMAGE_NAMES"
+          fi
+
+      - name: Set validation outputs
+        id: validate
+        run: |
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
+          echo "registry_name=${{ env.registry_name }}" >> $GITHUB_OUTPUT
+
+  grant-access:
+    name: Grant Registry Access
+    runs-on: ubuntu-latest
+    needs: validate-access-request
+    if: needs.validate-access-request.outputs.validation_passed == 'true'
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create custom scope map for app access
+        id: create-scope-map
+        run: |
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          APP_NAME="${{ github.event.inputs.app_service_name }}"
+          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          IMAGE_NAMES="${{ github.event.inputs.image_names }}"
+          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
+          
+          # Generate scope map name
+          SCOPE_MAP_NAME="${ENVIRONMENT}-${TEAM_NAME}-${APP_NAME}-readonly"
+          
+          echo "🔨 Creating scope map: $SCOPE_MAP_NAME"
+          
+          # Build repository patterns based on image names
+          if [[ "$IMAGE_NAMES" == "*" ]]; then
+            # Grant access to all team images in environment
+            REPO_PATTERN="repositories/${ENVIRONMENT}/${TEAM_NAME}/**"
+          else
+            # Grant access to specific images
+            IFS=',' read -ra IMAGE_ARRAY <<< "$IMAGE_NAMES"
+            REPO_PATTERNS=()
+            
+            for IMAGE in "${IMAGE_ARRAY[@]}"; do
+              IMAGE=$(echo "$IMAGE" | tr -d ' ')
+              REPO_PATTERNS+=("repositories/${ENVIRONMENT}/${TEAM_NAME}/${IMAGE}/**")
+            done
+          fi
+          
+          # Create scope map with read-only permissions
+          if [[ "$IMAGE_NAMES" == "*" ]]; then
+            az acr scope-map create \
+              --registry "$REGISTRY_NAME" \
+              --name "$SCOPE_MAP_NAME" \
+              --description "Read-only access for $APP_NAME to all $TEAM_NAME images in $ENVIRONMENT" \
+              --actions \
+                "repositories/${ENVIRONMENT}/${TEAM_NAME}/**/content/read" \
+                "repositories/${ENVIRONMENT}/${TEAM_NAME}/**/metadata/read"
+          else
+            # Build actions for specific images
+            ACTIONS=()
+            IFS=',' read -ra IMAGE_ARRAY <<< "$IMAGE_NAMES"
+            for IMAGE in "${IMAGE_ARRAY[@]}"; do
+              IMAGE=$(echo "$IMAGE" | tr -d ' ')
+              ACTIONS+=("repositories/${ENVIRONMENT}/${TEAM_NAME}/${IMAGE}/**/content/read")
+              ACTIONS+=("repositories/${ENVIRONMENT}/${TEAM_NAME}/${IMAGE}/**/metadata/read")
+            done
+            
+            az acr scope-map create \
+              --registry "$REGISTRY_NAME" \
+              --name "$SCOPE_MAP_NAME" \
+              --description "Read-only access for $APP_NAME to specific $TEAM_NAME images in $ENVIRONMENT" \
+              --actions "${ACTIONS[@]}"
+          fi
+          
+          echo "✅ Scope map created: $SCOPE_MAP_NAME"
+          echo "scope_map_name=$SCOPE_MAP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Assign AcrPull role to identity
+        run: |
+          IDENTITY_ID="${{ needs.validate-access-request.outputs.identity_id }}"
+          IDENTITY_TYPE="${{ needs.validate-access-request.outputs.identity_type }}"
+          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
+          SCOPE_MAP_NAME="${{ steps.create-scope-map.outputs.scope_map_name }}"
+          
+          echo "🔐 Assigning AcrPull role to $IDENTITY_TYPE: $IDENTITY_ID"
+          
+          # Get registry resource ID
+          REGISTRY_ID=$(az acr show --name "$REGISTRY_NAME" --query "id" -o tsv)
+          
+          # Create role assignment with scope map
+          az role assignment create \
+            --assignee "$IDENTITY_ID" \
+            --role "AcrPull" \
+            --scope "$REGISTRY_ID" \
+            --description "Image pull access for ${{ github.event.inputs.app_service_name }} via scope map $SCOPE_MAP_NAME"
+          
+          echo "✅ Role assignment created successfully"
+
+      - name: Verify access grant
+        run: |
+          IDENTITY_ID="${{ needs.validate-access-request.outputs.identity_id }}"
+          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
+          
+          echo "🔍 Verifying access grant..."
+          
+          # Check role assignment exists
+          ROLE_ASSIGNMENT_COUNT=$(az role assignment list --assignee "$IDENTITY_ID" --query "[?roleDefinitionName=='AcrPull'].id" -o tsv | wc -l)
+          
+          if [[ $ROLE_ASSIGNMENT_COUNT -eq 0 ]]; then
+            echo "❌ Role assignment verification failed"
+            exit 1
+          fi
+          
+          echo "✅ Access grant verified - $ROLE_ASSIGNMENT_COUNT AcrPull role(s) assigned"
+
+  create-tracking-issue:
+    name: Create Tracking Issue
+    runs-on: ubuntu-latest
+    needs: [validate-access-request, grant-access]
+    if: always()
+    
+    steps:
+      - name: Create success issue
+        if: needs.grant-access.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueBody = `## ✅ App Service Image Access Granted Successfully
+
+            **Application Details:**
+            - **App/Service Name:** ${{ github.event.inputs.app_service_name }}
+            - **Team:** ${{ github.event.inputs.team_name }}
+            - **Environment:** ${{ github.event.inputs.environment }}
+            - **Images:** ${{ github.event.inputs.image_names }}
+            - **Identity Type:** ${{ needs.validate-access-request.outputs.identity_type }}
+            - **Identity ID:** ${{ needs.validate-access-request.outputs.identity_id }}
+            - **Access Duration:** ${{ github.event.inputs.access_duration }}
+
+            **Access Granted:**
+            - ✅ **AcrPull** role assigned to identity
+            - ✅ **Scope map** created for repository-level access
+            - ✅ **Read-only** access to specified images
+
+            **Registry Access Pattern:**
+            \`\`\`
+            Registry: ${{ needs.validate-access-request.outputs.registry_name }}
+            ${{ github.event.inputs.image_names === '*' && 
+              \`Pattern: ${{ github.event.inputs.environment }}/${{ github.event.inputs.team_name }}/**\` ||
+              github.event.inputs.image_names.split(',').map(img => 
+                \`Pattern: ${{ github.event.inputs.environment }}/${{ github.event.inputs.team_name }}/\${img.trim()}/**\`
+              ).join('\\n')
+            }}
+            \`\`\`
+
+            **Usage Instructions:**
+            Your application can now pull images using the assigned managed identity or service principal:
+
+            ${{ needs.validate-access-request.outputs.identity_type === 'managed-identity' && \`
+            **For Managed Identity:**
+            1. Ensure your app service has the managed identity assigned
+            2. Use Azure's default credential chain for authentication
+            3. Images will authenticate automatically when pulling
+            \` || \`
+            **For Service Principal:**
+            1. Configure your application with the service principal credentials
+            2. Use Azure CLI or SDK authentication
+            3. Authenticate before pulling images
+            \`}}
+
+            **Access Review:**
+            - **Justification:** ${{ github.event.inputs.access_justification }}
+            - **Duration:** ${{ github.event.inputs.access_duration }}
+            - **Requestor:** ${{ github.event.inputs.requestor_email }}
+
+            ${{ github.event.inputs.access_duration.includes('temporary') && \`
+            ⚠️ **Temporary Access**: This access is marked as temporary. Please review and remove when no longer needed.
+            \` || '' }}
+
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            /label app-service-access,success,${{ github.event.inputs.team_name }}
+            `;
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `✅ App Service Access: ${{ github.event.inputs.app_service_name }}`,
+              body: issueBody,
+              labels: ['app-service-access', 'success', '${{ github.event.inputs.team_name }}']
+            });
+
+      - name: Create failure issue
+        if: needs.grant-access.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `❌ App Service Access Failed: ${{ github.event.inputs.app_service_name }}`,
+              body: `## ❌ App Service Image Access Grant Failed
+
+              **Application Details:**
+              - **App/Service Name:** ${{ github.event.inputs.app_service_name }}
+              - **Team:** ${{ github.event.inputs.team_name }}
+              - **Environment:** ${{ github.event.inputs.environment }}
+              - **Requestor:** ${{ github.event.inputs.requestor_email }}
+
+              **Failure Details:**
+              Please check the workflow logs for specific error details.
+
+              **Next Steps:**
+              1. Review the workflow logs to identify the issue
+              2. Ensure you have access to the specified identity
+              3. Verify your team has registry access for the environment
+              4. Re-submit the access request through Backstage
+
+              **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+              /label app-service-access,failure,${{ github.event.inputs.team_name }}
+              `,
+              labels: ['app-service-access', 'failure', '${{ github.event.inputs.team_name }}']
+            });
+
+  notify-requestor:
+    name: Notify Requestor
+    runs-on: ubuntu-latest
+    needs: [validate-access-request, grant-access]
+    if: always()
+    
+    steps:
+      - name: Send notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: |
+            ${{ needs.grant-access.result == 'success' && '✅' || '❌' }} ACR Image Access: ${{ github.event.inputs.app_service_name }}
+          to: ${{ github.event.inputs.requestor_email }}
+          from: BrightCloud Container Registry <${{ secrets.SMTP_FROM_ADDRESS }}>
+          body: |
+            Hello,
+
+            Your app service image access request has ${{ needs.grant-access.result == 'success' && 'completed successfully' || 'failed' }}.
+
+            **Application:** ${{ github.event.inputs.app_service_name }}
+            **Team:** ${{ github.event.inputs.team_name }}
+            **Environment:** ${{ github.event.inputs.environment }}
+            **Images:** ${{ github.event.inputs.image_names }}
+
+            ${{ needs.grant-access.result == 'success' && 'Your application now has pull access to the specified container images using the configured identity.
+
+            Registry: ' + needs.validate-access-request.outputs.registry_name + '
+            Identity: ' + needs.validate-access-request.outputs.identity_type + ' (' + needs.validate-access-request.outputs.identity_id + ')
+
+            Your application will authenticate automatically when pulling images.' || 'Please check the workflow logs and GitHub issue for details on the failure.' }}
+
+            **Workflow Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Best regards,
+            BrightCloud Container Registry Platform

@@ -19,7 +19,7 @@ provider "azurerm" {
 provider "azuread" {}
 
 locals {
-  environment = "prod"
+  environment = "production"
   tags = {
     Environment = local.environment
     Purpose     = "brightcloud-acr"

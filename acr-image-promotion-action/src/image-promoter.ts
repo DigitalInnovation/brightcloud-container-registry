@@ -185,7 +185,7 @@ export class ImagePromoter {
   }
 
   private extractRegistryName(registryUrl: string): string {
-    // Extract registry name from URL (e.g., brightcloudprod-abc123 from brightcloudprod-abc123.azurecr.io)
+    // Extract registry name from URL (e.g., brightcloudproduction from brightcloudproduction.azurecr.io)
     return registryUrl.replace('.azurecr.io', '');
   }
 }

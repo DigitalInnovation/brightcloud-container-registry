@@ -18,11 +18,11 @@ inputs:
   nonprod-registry:
     description: 'Non-production registry URL'
     required: false
-    default: 'brightcloudnonprod-abc123.azurecr.io'
+    default: 'brightcloudnonprod.azurecr.io'
   prod-registry:
     description: 'Production registry URL'
     required: false
-    default: 'brightcloudprod-def456.azurecr.io'
+    default: 'brightcloudproduction.azurecr.io'
   azure-client-id:
     description: 'Azure service principal client ID (for OIDC)'
     required: true
@@ -65,7 +65,7 @@ runs:
         source-registry: ${{ inputs.nonprod-registry }}
         target-registry: ${{ inputs.prod-registry }}
         source-environment: 'dev'
-        target-environment: 'prod'
+        target-environment: 'production'
         team-name: ${{ inputs.team-name }}
         image-name: ${{ inputs.image-name }}
         source-tag: ${{ inputs.source-tag }}

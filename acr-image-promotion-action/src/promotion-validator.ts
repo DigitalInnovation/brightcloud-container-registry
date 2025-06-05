@@ -1,3 +1,6 @@
+import { TeamIdentityValidator, TeamIdentityConfig } from './team-identity-validator';
+import { TokenCredential } from '@azure/core-auth';
+
 export interface ValidationResult {
   isValid: boolean;
   errors: string[];
@@ -17,25 +20,35 @@ export interface PromotionRequest {
   force: boolean;
 }
 
+export interface SecurityValidationConfig {
+  credential: TokenCredential;
+  subscriptionId: string;
+  resourceGroupName: string;
+  enableTeamIdentityValidation: boolean;
+}
+
 export class PromotionValidator {
-  private readonly VALID_ENVIRONMENTS = ['pr', 'dev', 'perf', 'preproduction', 'production', 'prod'];
+  private readonly VALID_ENVIRONMENTS = ['sandbox', 'pr', 'dev', 'perf', 'preproduction', 'production'];
   
   private readonly PROMOTION_MATRIX = {
+    'sandbox': [], // Sandbox is isolated - no promotions out
     'pr': ['dev'],
-    'dev': ['perf', 'preproduction', 'prod'], // Allow dev->prod for simple pipelines
-    'perf': ['preproduction', 'prod'],
-    'preproduction': ['production', 'prod'], // Allow both naming conventions
-    'production': [], // No promotion from production
-    'prod': [] // No promotion from prod (alternative naming)
+    'dev': ['perf', 'preproduction', 'production'], // Allow dev->production for simple pipelines
+    'perf': ['preproduction', 'production'],
+    'preproduction': ['production'],
+    'production': [] // No promotion from production
   };
 
   private readonly REGISTRY_PATTERNS = {
-    sandbox: /^brightcloudsandbox-[a-f0-9]{8}\.azurecr\.io$/,
-    nonprod: /^brightcloudnonprod-[a-f0-9]{8}\.azurecr\.io$/,
-    prod: /^brightcloudprod-[a-f0-9]{8}\.azurecr\.io$/
+    sandbox: /^brightcloudsandbox\.azurecr\.io$/,
+    nonprod: /^brightcloudnonprod\.azurecr\.io$/,
+    production: /^brightcloudproduction\.azurecr\.io$/
   };
 
-  async validate(request: PromotionRequest): Promise<ValidationResult> {
+  async validate(
+    request: PromotionRequest, 
+    securityConfig?: SecurityValidationConfig
+  ): Promise<ValidationResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
 
@@ -60,11 +73,58 @@ export class PromotionValidator {
     // Validate cross-boundary promotions
     this.validateCrossBoundaryPromotion(request, errors);
 
+    // Security validation: verify team identity through OIDC + registry permissions
+    if (securityConfig?.enableTeamIdentityValidation) {
+      await this.validateTeamIdentitySecurity(request, securityConfig, errors);
+    }
+
     return {
       isValid: errors.length === 0,
       errors,
       warnings
     };
+  }
+
+  private async validateTeamIdentitySecurity(
+    request: PromotionRequest,
+    securityConfig: SecurityValidationConfig,
+    errors: string[]
+  ): Promise<void> {
+    try {
+      const validator = new TeamIdentityValidator(
+        securityConfig.credential,
+        securityConfig.subscriptionId
+      );
+
+      // Get OIDC token from GitHub Actions
+      const oidcToken = await validator.getOIDCTokenFromGitHubActions();
+
+      // Extract registry name from URL (e.g., "brightcloudnonprod-12345678.azurecr.io" -> "brightcloudnonprod-12345678")
+      const registryName = this.extractRegistryName(request.sourceRegistry);
+
+      const teamConfig: TeamIdentityConfig = {
+        teamName: request.teamName,
+        registryName: registryName,
+        resourceGroupName: securityConfig.resourceGroupName,
+        subscriptionId: securityConfig.subscriptionId
+      };
+
+      // Validate that the service principal has team-specific access
+      await validator.validateTeamIdentity(oidcToken, teamConfig);
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`Team identity validation failed: ${errorMessage}`);
+    }
+  }
+
+  private extractRegistryName(registryUrl: string): string {
+    // Extract registry name from URL like "brightcloudnonprod-12345678.azurecr.io"
+    const match = registryUrl.match(/^([^.]+)\.azurecr\.io$/);
+    if (!match) {
+      throw new Error(`Invalid registry URL format: ${registryUrl}`);
+    }
+    return match[1];
   }
 
   private validateTeamNameConsistency(request: PromotionRequest, errors: string[]): void {

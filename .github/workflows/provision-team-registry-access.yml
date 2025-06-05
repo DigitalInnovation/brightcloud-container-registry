@@ -1,0 +1,548 @@
+name: Provision Team Registry Access
+
+on:
+  workflow_dispatch:
+    inputs:
+      team_name:
+        description: 'Team name (lowercase, alphanumeric, hyphens, underscores only)'
+        required: true
+        type: string
+      environments:
+        description: 'Comma-separated list of environments (sandbox,nonprod,production)'
+        required: true
+        type: string
+      azure_ad_group_id:
+        description: 'Azure AD Group Object ID for team members'
+        required: true
+        type: string
+      sandbox_service_principal:
+        description: 'Sandbox Service Principal Object ID'
+        required: false
+        type: string
+      nonprod_service_principal:
+        description: 'Non-production Service Principal Object ID'
+        required: false
+        type: string
+      production_service_principal:
+        description: 'Production Service Principal Object ID'
+        required: false
+        type: string
+      requestor_email:
+        description: 'Email of person making this request'
+        required: true
+        type: string
+      business_justification:
+        description: 'Business justification for access'
+        required: true
+        type: string
+      data_classification:
+        description: 'Data classification level'
+        required: true
+        type: choice
+        options:
+          - public
+          - internal
+          - confidential
+          - restricted
+
+permissions:
+  id-token: write   # Required for OIDC authentication
+  contents: read    # Required for repository access
+  issues: write     # Required for creating tracking issues
+  actions: write    # Required for workflow management
+
+env:
+  TERRAFORM_VERSION: '1.6.0'
+
+jobs:
+  security-validation:
+    name: Security Validation
+    runs-on: ubuntu-latest
+    outputs:
+      validation_passed: ${{ steps.validate.outputs.validation_passed }}
+      validated_environments: ${{ steps.validate.outputs.validated_environments }}
+      requires_approval: ${{ steps.validate.outputs.requires_approval }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Validate team name format
+        run: |
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          if [[ ! "$TEAM_NAME" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "❌ Invalid team name format. Must be lowercase alphanumeric with hyphens, underscores, or periods."
+            exit 1
+          fi
+          
+          if [[ ${#TEAM_NAME} -gt 64 ]]; then
+            echo "❌ Team name too long. Must be 64 characters or less."
+            exit 1
+          fi
+          
+          echo "✅ Team name format valid: $TEAM_NAME"
+
+      - name: Validate Azure AD Group access
+        id: validate-ad-group
+        run: |
+          GROUP_ID="${{ github.event.inputs.azure_ad_group_id }}"
+          
+          # Check if group exists and requestor has access
+          if ! az ad group show --group "$GROUP_ID" --output none 2>/dev/null; then
+            echo "❌ Azure AD Group not found or insufficient permissions: $GROUP_ID"
+            echo "You must have at least read access to the Azure AD group to onboard it."
+            exit 1
+          fi
+          
+          # Get group details for validation
+          GROUP_NAME=$(az ad group show --group "$GROUP_ID" --query "displayName" -o tsv)
+          GROUP_MEMBERS=$(az ad group member list --group "$GROUP_ID" --query "length(@)" -o tsv)
+          
+          echo "✅ Azure AD Group validated:"
+          echo "  - Group ID: $GROUP_ID"
+          echo "  - Group Name: $GROUP_NAME"
+          echo "  - Member Count: $GROUP_MEMBERS"
+          
+          # Verify requestor has appropriate permissions (member or owner)
+          REQUESTOR_UPN="${{ github.event.inputs.requestor_email }}"
+          REQUESTOR_IN_GROUP=$(az ad group member list --group "$GROUP_ID" --query "[?mail=='$REQUESTOR_UPN' || userPrincipalName=='$REQUESTOR_UPN'].id" -o tsv | wc -l)
+          
+          if [[ $REQUESTOR_IN_GROUP -eq 0 ]]; then
+            # Check if they're an owner
+            REQUESTOR_IS_OWNER=$(az ad group owner list --group "$GROUP_ID" --query "[?mail=='$REQUESTOR_UPN' || userPrincipalName=='$REQUESTOR_UPN'].id" -o tsv | wc -l)
+            if [[ $REQUESTOR_IS_OWNER -eq 0 ]]; then
+              echo "❌ Security violation: Requestor is not a member or owner of the Azure AD group"
+              echo "You can only onboard Azure AD groups you belong to."
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Requestor authorization verified"
+
+      - name: Validate Service Principal access
+        id: validate-service-principals
+        run: |
+          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
+          
+          for ENV in "${ENV_ARRAY[@]}"; do
+            ENV=$(echo "$ENV" | tr -d ' ')  # Remove whitespace
+            
+            case $ENV in
+              sandbox)
+                SP_ID="${{ github.event.inputs.sandbox_service_principal }}"
+                ;;
+              nonprod)
+                SP_ID="${{ github.event.inputs.nonprod_service_principal }}"
+                ;;
+              production)
+                SP_ID="${{ github.event.inputs.production_service_principal }}"
+                ;;
+              *)
+                echo "❌ Invalid environment: $ENV"
+                exit 1
+                ;;
+            esac
+            
+            if [[ -n "$SP_ID" ]]; then
+              echo "🔍 Validating service principal for $ENV environment..."
+              
+              # Check if SP exists and requestor has access
+              if ! az ad sp show --id "$SP_ID" --output none 2>/dev/null; then
+                echo "❌ Service Principal not found or insufficient permissions: $SP_ID"
+                echo "You must have access to view the service principal to onboard it."
+                exit 1
+              fi
+              
+              SP_NAME=$(az ad sp show --id "$SP_ID" --query "displayName" -o tsv)
+              SP_APP_ID=$(az ad sp show --id "$SP_ID" --query "appId" -o tsv)
+              
+              echo "✅ Service Principal validated for $ENV:"
+              echo "  - Object ID: $SP_ID"
+              echo "  - Name: $SP_NAME"
+              echo "  - App ID: $SP_APP_ID"
+              
+              # Security check: Verify SP is not overly privileged
+              # Check if SP has high-level Azure roles that might indicate compromise
+              HIGH_PRIV_ROLES=$(az role assignment list --assignee "$SP_ID" --query "[?roleDefinitionName=='Owner' || roleDefinitionName=='Contributor' || roleDefinitionName=='User Access Administrator'].roleDefinitionName" -o tsv | wc -l)
+              
+              if [[ $HIGH_PRIV_ROLES -gt 0 ]]; then
+                echo "⚠️  Warning: Service Principal has high-privilege Azure roles"
+                echo "   Consider using a more restricted service principal for ACR access"
+              fi
+            else
+              echo "⚠️  No service principal provided for $ENV environment"
+              echo "   Teams can add this later using the app service access flow"
+            fi
+          done
+
+      - name: Production environment validation
+        if: contains(github.event.inputs.environments, 'production')
+        run: |
+          echo "🔒 Production environment access requested"
+          echo "🔍 Performing additional security validation..."
+          
+          DATA_CLASS="${{ github.event.inputs.data_classification }}"
+          
+          # Restricted data requires additional approval
+          if [[ "$DATA_CLASS" == "restricted" ]]; then
+            echo "❌ Restricted data classification requires manual approval process"
+            echo "Please contact the security team for restricted data container registry access"
+            exit 1
+          fi
+          
+          # Check business justification length
+          JUSTIFICATION="${{ github.event.inputs.business_justification }}"
+          if [[ ${#JUSTIFICATION} -lt 50 ]]; then
+            echo "❌ Business justification too short for production access"
+            echo "Please provide detailed justification (minimum 50 characters) for production access"
+            exit 1
+          fi
+          
+          echo "✅ Production access validation passed"
+
+      - name: Set validation outputs
+        id: validate
+        run: |
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
+          echo "validated_environments=${{ github.event.inputs.environments }}" >> $GITHUB_OUTPUT
+          
+          # Determine if manual approval required
+          REQUIRES_APPROVAL="false"
+          if [[ "${{ contains(github.event.inputs.environments, 'production') }}" == "true" ]]; then
+            REQUIRES_APPROVAL="true"
+          fi
+          echo "requires_approval=$REQUIRES_APPROVAL" >> $GITHUB_OUTPUT
+
+  manual-approval:
+    name: Manual Approval (Production)
+    runs-on: ubuntu-latest
+    needs: security-validation
+    if: needs.security-validation.outputs.requires_approval == 'true'
+    environment: production-onboarding  # Requires manual approval in GitHub
+    
+    steps:
+      - name: Production access confirmation
+        run: |
+          echo "🚨 PRODUCTION REGISTRY ACCESS REQUEST"
+          echo ""
+          echo "Team: ${{ github.event.inputs.team_name }}"
+          echo "Requestor: ${{ github.event.inputs.requestor_email }}"
+          echo "Data Classification: ${{ github.event.inputs.data_classification }}"
+          echo "Justification: ${{ github.event.inputs.business_justification }}"
+          echo ""
+          echo "Manual approval granted for production access."
+
+  provision-terraform:
+    name: Provision Registry Access
+    runs-on: ubuntu-latest
+    needs: [security-validation, manual-approval]
+    if: |
+      always() && 
+      needs.security-validation.outputs.validation_passed == 'true' && 
+      (needs.manual-approval.result == 'success' || needs.manual-approval.result == 'skipped')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Generate team configuration
+        id: config
+        run: |
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          
+          # Convert environments to Terraform format
+          IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
+          ENV_LIST=""
+          for ENV in "${ENV_ARRAY[@]}"; do
+            ENV=$(echo "$ENV" | tr -d ' ')
+            if [[ -z "$ENV_LIST" ]]; then
+              ENV_LIST="\"$ENV\""
+            else
+              ENV_LIST="$ENV_LIST, \"$ENV\""
+            fi
+          done
+          ENV_LIST="[$ENV_LIST]"
+          
+          # Create team configuration for each registry tier
+          for TIER in sandbox nonprod production; do
+            if [[ "$ENVIRONMENTS" == *"$TIER"* ]] || [[ "$TIER" == "nonprod" && ("$ENVIRONMENTS" == *"pr"* || "$ENVIRONMENTS" == *"dev"* || "$ENVIRONMENTS" == *"perf"* || "$ENVIRONMENTS" == *"preproduction"*) ]]; then
+              CONFIG_DIR="terraform-azurerm-acr-platform/environments/$TIER/teams"
+              mkdir -p "$CONFIG_DIR"
+              
+              # Get appropriate service principal
+              case $TIER in
+                sandbox)
+                  SP_ID="${{ github.event.inputs.sandbox_service_principal }}"
+                  ;;
+                nonprod)
+                  SP_ID="${{ github.event.inputs.nonprod_service_principal }}"
+                  ;;
+                production)
+                  SP_ID="${{ github.event.inputs.production_service_principal }}"
+                  ;;
+              esac
+              
+              # Create team configuration file
+              cat > "$CONFIG_DIR/${TEAM_NAME}.tf" << EOF
+          # Team configuration for: $TEAM_NAME
+          # Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          # Requestor: ${{ github.event.inputs.requestor_email }}
+          # Registry Tier: $TIER
+          
+          locals {
+            team_${TEAM_NAME//-/_}_${TIER} = {
+              name                 = "$TEAM_NAME"
+              azure_ad_group_id    = "${{ github.event.inputs.azure_ad_group_id }}"
+              service_principal_id = $(if [[ -n "$SP_ID" ]]; then echo "\"$SP_ID\""; else echo "null"; fi)
+              environments         = $ENV_LIST
+              data_classification  = "${{ github.event.inputs.data_classification }}"
+              business_justification = "${{ github.event.inputs.business_justification }}"
+              onboarded_date      = "$(date -u +"%Y-%m-%d")"
+              requestor_email     = "${{ github.event.inputs.requestor_email }}"
+            }
+          }
+          
+          # Add team to the teams variable for $TIER
+          variable "team_${TEAM_NAME//-/_}_${TIER}" {
+            description = "Team configuration for $TEAM_NAME in $TIER registry"
+            type = object({
+              name                   = string
+              azure_ad_group_id      = string
+              service_principal_id   = optional(string)
+              environments           = list(string)
+              data_classification    = string
+              business_justification = string
+              onboarded_date        = string
+              requestor_email       = string
+            })
+            default = local.team_${TEAM_NAME//-/_}_${TIER}
+          }
+          EOF
+              
+              echo "✅ Created team configuration for $TIER: $CONFIG_DIR/${TEAM_NAME}.tf"
+            fi
+          done
+
+      - name: Apply Terraform changes
+        run: |
+          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          
+          # Apply changes to each relevant registry tier
+          for TIER in sandbox nonprod production; do
+            if [[ "$ENVIRONMENTS" == *"$TIER"* ]] || [[ "$TIER" == "nonprod" && ("$ENVIRONMENTS" == *"pr"* || "$ENVIRONMENTS" == *"dev"* || "$ENVIRONMENTS" == *"perf"* || "$ENVIRONMENTS" == *"preproduction"*) ]]; then
+              echo "🚀 Provisioning team access in $TIER registry..."
+              
+              cd "terraform-azurerm-acr-platform/environments/$TIER"
+              
+              # Initialize Terraform
+              terraform init \
+                -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
+                -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+                -backend-config="container_name=tfstate" \
+                -backend-config="key=acr-${TIER}.tfstate"
+              
+              # Plan and apply
+              terraform plan -var-file="terraform.tfvars"
+              terraform apply -auto-approve -var-file="terraform.tfvars"
+              
+              echo "✅ Team access provisioned in $TIER registry"
+              cd ../../../
+            fi
+          done
+
+      - name: Validate provisioned access
+        run: |
+          echo "🔍 Validating provisioned registry access..."
+          
+          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          GROUP_ID="${{ github.event.inputs.azure_ad_group_id }}"
+          
+          # Test access for each registry
+          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
+          
+          for ENV in "${ENV_ARRAY[@]}"; do
+            ENV=$(echo "$ENV" | tr -d ' ')
+            
+            # Determine registry based on environment
+            case $ENV in
+              sandbox)
+                REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_SANDBOX_REGISTRY_NAME }}"
+                ;;
+              pr|dev|perf|preproduction)
+                REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_NONPROD_REGISTRY_NAME }}"
+                ;;
+              production)
+                REGISTRY_NAME="${{ secrets.BRIGHTCLOUD_PRODUCTION_REGISTRY_NAME }}"
+                ;;
+            esac
+            
+            echo "Testing access for environment: $ENV (registry: $REGISTRY_NAME)"
+            
+            # Verify scope map exists
+            SCOPE_MAP_EXISTS=$(az acr scope-map list --registry "$REGISTRY_NAME" --query "[?name=='${ENV}-${TEAM_NAME}-scope'].name" -o tsv | wc -l)
+            if [[ $SCOPE_MAP_EXISTS -eq 0 ]]; then
+              echo "❌ Scope map not found for $ENV environment"
+              exit 1
+            fi
+            
+            echo "✅ Access validated for $ENV environment"
+          done
+
+  create-tracking-issue:
+    name: Create Tracking Issue
+    runs-on: ubuntu-latest
+    needs: [security-validation, provision-terraform]
+    if: always()
+    
+    steps:
+      - name: Create success issue
+        if: needs.provision-terraform.result == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueBody = `## ✅ Team Registry Access Provisioned Successfully
+
+            **Team Details:**
+            - **Team Name:** ${{ github.event.inputs.team_name }}
+            - **Environments:** ${{ github.event.inputs.environments }}
+            - **Azure AD Group:** ${{ github.event.inputs.azure_ad_group_id }}
+            - **Requestor:** ${{ github.event.inputs.requestor_email }}
+            - **Data Classification:** ${{ github.event.inputs.data_classification }}
+
+            **Access Granted:**
+            ${{ github.event.inputs.environments.split(',').map(env => 
+              `- ✅ **${env.trim()}** environment - Repository pattern: \`{registry}/${env.trim()}/${{ github.event.inputs.team_name }}/{image}:{tag}\``
+            ).join('\n') }}
+
+            **Security Features:**
+            - ✅ Azure AD Group assigned AcrPull role for team members
+            - ✅ Repository-scoped permissions (ABAC) configured
+            - ✅ Service principal access configured where provided
+            - ✅ Team isolated to their namespace: \`{environment}/${{ github.event.inputs.team_name }}/*\`
+
+            **Next Steps Available:**
+            1. **Add App Service Access** - Grant managed identities pull access to specific images
+            2. **Configure CI/CD** - Set up GitHub Actions workflows for image builds and promotions  
+            3. **Request Additional Environments** - Expand access as your team grows
+
+            **Repository Examples:**
+            ${{ github.event.inputs.environments.split(',').map(env => {
+              const registryMap = {
+                'sandbox': 'brightcloudsandbox.azurecr.io',
+                'pr': 'brightcloudnonprod.azurecr.io', 
+                'dev': 'brightcloudnonprod.azurecr.io',
+                'perf': 'brightcloudnonprod.azurecr.io',
+                'preproduction': 'brightcloudnonprod.azurecr.io',
+                'production': 'brightcloudproduction.azurecr.io'
+              };
+              const registry = registryMap[env.trim()] || 'registry.azurecr.io';
+              return `- **${env.trim()}**: \`${registry}/${env.trim()}/${{ github.event.inputs.team_name }}/my-app:v1.0.0\``;
+            }).join('\n') }}
+
+            **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            /label team-onboarding,success,${{ github.event.inputs.team_name }}
+            `;
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `✅ Team Registry Access: ${{ github.event.inputs.team_name }}`,
+              body: issueBody,
+              labels: ['team-onboarding', 'success', '${{ github.event.inputs.team_name }}']
+            });
+
+            return issue.html_url;
+
+      - name: Create failure issue
+        if: needs.provision-terraform.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `❌ Team Registry Access Failed: ${{ github.event.inputs.team_name }}`,
+              body: `## ❌ Team Registry Access Provisioning Failed
+
+              **Team Details:**
+              - **Team Name:** ${{ github.event.inputs.team_name }}
+              - **Environments:** ${{ github.event.inputs.environments }}
+              - **Requestor:** ${{ github.event.inputs.requestor_email }}
+
+              **Failure Details:**
+              Please check the workflow logs for specific error details.
+
+              **Next Steps:**
+              1. Review the workflow logs to identify the issue
+              2. Correct any configuration problems
+              3. Re-run the onboarding process through Backstage
+
+              **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+              /label team-onboarding,failure,${{ github.event.inputs.team_name }}
+              `,
+              labels: ['team-onboarding', 'failure', '${{ github.event.inputs.team_name }}']
+            });
+
+  notify-requestor:
+    name: Notify Requestor
+    runs-on: ubuntu-latest
+    needs: [security-validation, provision-terraform]
+    if: always()
+    
+    steps:
+      - name: Send notification email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_SERVER }}
+          server_port: ${{ secrets.SMTP_PORT }}
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: |
+            ${{ needs.provision-terraform.result == 'success' && '✅' || '❌' }} ACR Team Access: ${{ github.event.inputs.team_name }}
+          to: ${{ github.event.inputs.requestor_email }}
+          from: BrightCloud Container Registry <${{ secrets.SMTP_FROM_ADDRESS }}>
+          body: |
+            Hello,
+
+            Your team registry access request has ${{ needs.provision-terraform.result == 'success' && 'completed successfully' || 'failed' }}.
+
+            **Team Name:** ${{ github.event.inputs.team_name }}
+            **Environments:** ${{ github.event.inputs.environments }}
+
+            ${{ needs.provision-terraform.result == 'success' && 'Your team can now use the container registry with the repository pattern: `{registry}/{environment}/${{ github.event.inputs.team_name }}/{image}:{tag}`
+
+            Next steps:
+            - Configure your CI/CD pipelines to push images to your team repositories
+            - Use the ACR promotion actions to move images between environments
+            - Add app service access for your deployed applications to pull images
+
+            Documentation: https://docs.brightcloud.com/container-registry' || 'Please check the workflow logs and GitHub issue for details on the failure.' }}
+
+            **Workflow Details:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            Best regards,
+            BrightCloud Container Registry Platform
