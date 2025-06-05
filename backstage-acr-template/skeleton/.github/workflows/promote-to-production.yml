@@ -42,6 +42,7 @@ jobs:
           source-environment: 'dev'
           target-environment: 'preproduction'
           image-name: ${{ values.name }}
+          team-name: ${{ values.team_name }}
           source-tag: $${{ inputs.source-tag }}
           target-tag: $${{ inputs.target-tag || inputs.source-tag }}
           azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
@@ -68,6 +69,7 @@ jobs:
           source-environment: 'preproduction'
           target-environment: 'prod'
           image-name: ${{ values.name }}
+          team-name: ${{ values.team_name }}
           source-tag: $${{ needs.promote-to-preproduction.outputs.promoted-tag }}
           azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
           azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
@@ -76,5 +78,5 @@ jobs:
       - name: Notify deployment complete
         run: |
           echo "🎉 ${{ values.name }} has been successfully promoted to production!"
-          echo "Image: ${{ values.registry_url_prod }}/production/${{ values.name }}:$${{ needs.promote-to-preproduction.outputs.promoted-tag }}"
+          echo "Image: ${{ values.registry_url_prod }}/prod/${{ values.team_name }}/${{ values.name }}:$${{ needs.promote-to-preproduction.outputs.promoted-tag }}"
 {%- endif %}

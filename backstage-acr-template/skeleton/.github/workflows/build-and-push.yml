@@ -57,7 +57,7 @@ jobs:
 
       - name: Build and push image
         run: |
-          FULL_IMAGE_NAME="${REGISTRY_URL}/${{ steps.env.outputs.environment }}/${IMAGE_NAME}:${{ steps.env.outputs.tag }}"
+          FULL_IMAGE_NAME="${REGISTRY_URL}/${{ steps.env.outputs.environment }}/${{ values.team_name }}/${IMAGE_NAME}:${{ steps.env.outputs.tag }}"
           
           echo "Building image: ${FULL_IMAGE_NAME}"
           docker build -t "${FULL_IMAGE_NAME}" .
@@ -91,6 +91,7 @@ jobs:
               uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
               with:
                 image-name: '${{ values.name }}'
+                team-name: '${{ values.team_name }}'
                 source-tag: '${{ steps.env.outputs.tag }}'
                 target-tag: 'dev-$${{ github.sha }}'
                 azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
@@ -104,6 +105,7 @@ jobs:
               uses: DigitalInnovation/acr-image-promotion-action/promote-to-production@v1
               with:
                 image-name: '${{ values.name }}'
+                team-name: '${{ values.team_name }}'
                 source-tag: 'dev-$${{ github.sha }}'
                 azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
                 azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
@@ -140,6 +142,7 @@ jobs:
         uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
         with:
           image-name: ${{ values.name }}
+          team-name: ${{ values.team_name }}
           source-tag: 'dev-$${{ github.sha }}'
           target-tag: 'dev-$${{ github.sha }}'
           azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
@@ -167,6 +170,7 @@ jobs:
           source-environment: 'dev'
           target-environment: 'perf'
           image-name: ${{ values.name }}
+          team-name: ${{ values.team_name }}
           source-tag: 'dev-$${{ github.sha }}'
           target-tag: 'perf-$${{ github.sha }}'
           azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
