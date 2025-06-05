@@ -3,8 +3,11 @@ description: 'Promotes container images from PR environment to dev environment i
 author: 'BrightCloud Platform Team'
 
 inputs:
+  team-name:
+    description: 'Team name that owns the image'
+    required: true
   image-name:
-    description: 'Name of the image to promote (without registry/environment prefix)'
+    description: 'Name of the image to promote (without registry/environment/team prefix)'
     required: true
   source-tag:
     description: 'Source image tag to promote from PR environment'
@@ -59,6 +62,7 @@ runs:
         target-registry: ${{ inputs.nonprod-registry }}
         source-environment: 'pr'
         target-environment: 'dev'
+        team-name: ${{ inputs.team-name }}
         image-name: ${{ inputs.image-name }}
         source-tag: ${{ inputs.source-tag }}
         target-tag: ${{ inputs.target-tag || inputs.source-tag }}

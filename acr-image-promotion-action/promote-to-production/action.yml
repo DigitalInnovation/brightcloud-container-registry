@@ -3,8 +3,11 @@ description: 'Promotes container images from dev environment in nonprod registry
 author: 'BrightCloud Platform Team'
 
 inputs:
+  team-name:
+    description: 'Team name for image organization and access control'
+    required: true
   image-name:
-    description: 'Name of the image to promote (without registry/environment prefix)'
+    description: 'Name of the image to promote (without registry/environment/team prefix)'
     required: true
   source-tag:
     description: 'Source image tag to promote from dev environment'
@@ -63,6 +66,7 @@ runs:
         target-registry: ${{ inputs.prod-registry }}
         source-environment: 'dev'
         target-environment: 'prod'
+        team-name: ${{ inputs.team-name }}
         image-name: ${{ inputs.image-name }}
         source-tag: ${{ inputs.source-tag }}
         target-tag: ${{ inputs.target-tag || inputs.source-tag }}

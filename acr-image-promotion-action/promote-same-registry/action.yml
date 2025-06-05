@@ -12,8 +12,11 @@ inputs:
   target-environment:
     description: 'Target environment (dev, perf, preproduction, production)'
     required: true
+  team-name:
+    description: 'Team name that owns the image'
+    required: true
   image-name:
-    description: 'Name of the image to promote (without registry/environment prefix)'
+    description: 'Name of the image to promote (without registry/environment/team prefix)'
     required: true
   source-tag:
     description: 'Source image tag to promote'
@@ -64,6 +67,7 @@ runs:
         target-registry: ${{ inputs.registry }}
         source-environment: ${{ inputs.source-environment }}
         target-environment: ${{ inputs.target-environment }}
+        team-name: ${{ inputs.team-name }}
         image-name: ${{ inputs.image-name }}
         source-tag: ${{ inputs.source-tag }}
         target-tag: ${{ inputs.target-tag || inputs.source-tag }}

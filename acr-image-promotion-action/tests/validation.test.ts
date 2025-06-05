@@ -14,6 +14,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -40,6 +41,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: 'INVALID-NAME-WITH-CAPS',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -60,6 +62,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: '',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -79,6 +82,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: longName,
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -89,6 +93,110 @@ describe('PromotionValidator', () => {
       const result = await validator.validate(request);
       expect(result.isValid).toBe(false);
       expect(result.errors).toContain('Image name must be 128 characters or less.');
+    });
+  });
+
+  describe('Team Name Validation', () => {
+    it('should reject empty team names', async () => {
+      const request = {
+        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceEnvironment: 'dev',
+        targetEnvironment: 'preproduction',
+        teamName: '',
+        imageName: 'my-service',
+        sourceTag: 'v1.0.0',
+        targetTag: 'v1.0.0',
+        dryRun: false,
+        force: false
+      };
+
+      const result = await validator.validate(request);
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('Team name cannot be empty.');
+    });
+
+    it('should reject invalid team name format', async () => {
+      const invalidTeamNames = [
+        'TEAM-WITH-CAPS',
+        'team with spaces',
+        'team@invalid',
+        'team!name',
+        'team#name'
+      ];
+
+      for (const teamName of invalidTeamNames) {
+        const request = {
+          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceEnvironment: 'dev',
+          targetEnvironment: 'preproduction',
+          teamName: teamName,
+          imageName: 'my-service',
+          sourceTag: 'v1.0.0',
+          targetTag: 'v1.0.0',
+          dryRun: false,
+          force: false
+        };
+
+        const result = await validator.validate(request);
+        expect(result.isValid).toBe(false);
+        expect(result.errors).toContain(
+          'Team name must contain only lowercase letters, numbers, periods, hyphens, and underscores.'
+        );
+      }
+    });
+
+    it('should accept valid team name formats', async () => {
+      const validTeamNames = [
+        'team-name',
+        'team_name',
+        'team.name',
+        'team123',
+        'team-123',
+        'team_123',
+        'team.123',
+        'a',
+        'team-with-multiple-segments'
+      ];
+
+      for (const teamName of validTeamNames) {
+        const request = {
+          sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+          targetRegistry: 'brightcloudprod-def456.azurecr.io',
+          sourceEnvironment: 'dev',
+          targetEnvironment: 'preproduction',
+          teamName: teamName,
+          imageName: 'my-service',
+          sourceTag: 'v1.0.0',
+          targetTag: 'v1.0.0',
+          dryRun: false,
+          force: false
+        };
+
+        const result = await validator.validate(request);
+        expect(result.isValid).toBe(true);
+      }
+    });
+
+    it('should reject overly long team names', async () => {
+      const longName = 'a'.repeat(65);
+      const request = {
+        sourceRegistry: 'brightcloudnonprod-abc123.azurecr.io',
+        targetRegistry: 'brightcloudprod-def456.azurecr.io',
+        sourceEnvironment: 'dev',
+        targetEnvironment: 'preproduction',
+        teamName: longName,
+        imageName: 'my-service',
+        sourceTag: 'v1.0.0',
+        targetTag: 'v1.0.0',
+        dryRun: false,
+        force: false
+      };
+
+      const result = await validator.validate(request);
+      expect(result.isValid).toBe(false);
+      expect(result.errors).toContain('Team name must be 64 characters or less.');
     });
   });
 
@@ -108,6 +216,7 @@ describe('PromotionValidator', () => {
           targetRegistry: 'brightcloudprod-def456.azurecr.io',
           sourceEnvironment: promotion.from,
           targetEnvironment: promotion.to,
+          teamName: 'test-team',
           imageName: 'my-service',
           sourceTag: 'v1.0.0',
           targetTag: 'v1.0.0',
@@ -134,6 +243,7 @@ describe('PromotionValidator', () => {
           targetRegistry: 'brightcloudprod-def456.azurecr.io',
           sourceEnvironment: promotion.from,
           targetEnvironment: promotion.to,
+          teamName: 'test-team',
           imageName: 'my-service',
           sourceTag: 'v1.0.0',
           targetTag: 'v1.0.0',
@@ -152,6 +262,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'dev',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -179,6 +290,7 @@ describe('PromotionValidator', () => {
           targetRegistry: 'brightcloudprod-def456.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
+          teamName: 'test-team',
           imageName: 'my-service',
           sourceTag: 'v1.0.0',
           targetTag: 'v1.0.0',
@@ -198,6 +310,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'perf',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -216,6 +329,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
         sourceEnvironment: 'production',
         targetEnvironment: 'dev',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -244,6 +358,7 @@ describe('PromotionValidator', () => {
           targetRegistry: 'brightcloudprod-def456.azurecr.io',
           sourceEnvironment: 'dev',
           targetEnvironment: 'preproduction',
+          teamName: 'test-team',
           imageName: 'my-service',
           sourceTag: tag,
           targetTag: 'v1.0.0',
@@ -262,6 +377,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev',
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'latest',
         targetTag: 'latest',
@@ -281,6 +397,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudprod-def456.azurecr.io',
         sourceEnvironment: 'dev', // dev should use nonprod registry
         targetEnvironment: 'preproduction',
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',
@@ -299,6 +416,7 @@ describe('PromotionValidator', () => {
         targetRegistry: 'brightcloudnonprod-abc123.azurecr.io',
         sourceEnvironment: 'perf',
         targetEnvironment: 'production', // production should use prod registry
+        teamName: 'test-team',
         imageName: 'my-service',
         sourceTag: 'v1.0.0',
         targetTag: 'v1.0.0',

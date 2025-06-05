@@ -9,6 +9,7 @@ export interface PromotionRequest {
   targetRegistry: string;
   sourceEnvironment: string;
   targetEnvironment: string;
+  teamName: string;
   imageName: string;
   sourceTag: string;
   targetTag: string;
@@ -38,6 +39,9 @@ export class PromotionValidator {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    // Validate team name consistency (CRITICAL: No renaming allowed)
+    this.validateTeamNameConsistency(request, errors);
+    
     // Validate image name consistency (CRITICAL: No renaming allowed)
     this.validateImageNameConsistency(request, errors);
     
@@ -61,6 +65,29 @@ export class PromotionValidator {
       errors,
       warnings
     };
+  }
+
+  private validateTeamNameConsistency(request: PromotionRequest, errors: string[]): void {
+    // CRITICAL: Team name must remain exactly the same - no changing teams during promotion
+    if (!request.teamName) {
+      errors.push('Team name cannot be empty.');
+      return;
+    }
+
+    // Validate team name format
+    const teamNamePattern = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
+    if (!teamNamePattern.test(request.teamName)) {
+      errors.push('Team name must contain only lowercase letters, numbers, periods, hyphens, and underscores.');
+    }
+
+    // Validate team name length
+    if (request.teamName.length > 64) {
+      errors.push('Team name must be 64 characters or less.');
+    }
+
+    if (request.teamName.length < 1) {
+      errors.push('Team name cannot be empty.');
+    }
   }
 
   private validateImageNameConsistency(request: PromotionRequest, errors: string[]): void {
