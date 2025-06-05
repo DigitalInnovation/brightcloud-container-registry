@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: action-test-results
           path: |
@@ -220,7 +220,7 @@ jobs:
           fi
 
       - name: Upload packaged action
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: packaged-action
           path: acr-image-promotion-action/dist/

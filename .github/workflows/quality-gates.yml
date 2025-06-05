@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload Quality Results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: code-quality-results
           path: |
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload Security Results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: security-quality-results
           path: |
@@ -265,7 +265,7 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: testing-quality-results
           path: |
@@ -370,7 +370,7 @@ jobs:
 
       - name: Upload Infrastructure Results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: infrastructure-quality-results
           path: |
