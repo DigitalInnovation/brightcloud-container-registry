@@ -1,0 +1,218 @@
+name: Deploy Production ACR Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+      confirm_production:
+        description: 'Type "CONFIRM" to proceed with production changes'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+env:
+  TF_VERSION: '1.6.0'
+  WORKING_DIR: './environments/prod'
+
+jobs:
+  validate-input:
+    name: Validate Production Input
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        if: inputs.confirm_production != 'CONFIRM'
+        run: |
+          echo "❌ Production deployment requires explicit confirmation"
+          echo "Please enter 'CONFIRM' in the confirm_production field"
+          exit 1
+
+  terraform:
+    name: Terraform Production
+    runs-on: ubuntu-latest
+    needs: validate-input
+    environment: production
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ secrets.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=acr-prod.tfstate"
+
+      - name: Terraform Validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform plan \
+            -var-file="terraform.tfvars" \
+            -out=tfplan \
+            -detailed-exitcode
+        continue-on-error: true
+
+      - name: Security Scan of Terraform Plan
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          # Convert plan to JSON for analysis
+          terraform show -json tfplan > tfplan.json
+          
+          # Check for security violations
+          echo "🔍 Scanning Terraform plan for security violations..."
+          
+          # Verify public access is disabled
+          PUBLIC_ACCESS=$(jq -r '.planned_values.root_module.child_modules[].resources[] | select(.type=="azurerm_container_registry") | .values.public_network_access_enabled' tfplan.json 2>/dev/null || echo "null")
+          if [ "$PUBLIC_ACCESS" != "false" ]; then
+            echo "❌ Production ACR must have public network access disabled"
+            exit 1
+          fi
+          
+          # Verify private endpoint is created
+          PRIVATE_ENDPOINT=$(jq -r '.planned_values.root_module.child_modules[].resources[] | select(.type=="azurerm_private_endpoint") | .address' tfplan.json 2>/dev/null || echo "null")
+          if [ "$PRIVATE_ENDPOINT" = "null" ]; then
+            echo "❌ Production ACR must have private endpoint enabled"
+            exit 1
+          fi
+          
+          echo "✅ Security scan passed"
+
+      - name: Manual Approval Required
+        if: inputs.action == 'apply'
+        run: |
+          echo "🚨 PRODUCTION DEPLOYMENT"
+          echo "This will deploy changes to the production ACR infrastructure."
+          echo "Please review the plan carefully before proceeding."
+          echo ""
+          echo "Registry will be created with:"
+          echo "- Private endpoint only (no public access)"
+          echo "- Zone redundancy enabled"
+          echo "- Multi-region geo-replication"
+          echo "- ABAC repository-scoped permissions"
+          echo "- Enhanced security policies"
+
+      - name: Terraform Apply
+        if: inputs.action == 'apply'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          echo "🚀 Applying Terraform changes to production..."
+          terraform apply -auto-approve tfplan
+          echo "✅ Production ACR deployment completed"
+
+      - name: Upload Terraform Plan
+        if: steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-tfplan
+          path: ${{ env.WORKING_DIR }}/tfplan
+          retention-days: 30
+
+      - name: Post-deployment validation
+        if: inputs.action == 'apply'
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          # Get registry details
+          REGISTRY_NAME=$(terraform output -raw registry_name)
+          REGISTRY_URL=$(terraform output -raw registry_url)
+          
+          echo "✅ Production ACR deployed successfully"
+          echo "Registry Name: $REGISTRY_NAME"
+          echo "Registry URL: $REGISTRY_URL"
+          
+          # Test registry connectivity via private endpoint
+          az acr login --name "$REGISTRY_NAME"
+          echo "✅ Registry login successful"
+          
+          # Verify security settings
+          echo "🔍 Verifying production security settings..."
+          
+          PUBLIC_ACCESS=$(az acr show --name "$REGISTRY_NAME" --query "publicNetworkAccess" -o tsv)
+          if [ "$PUBLIC_ACCESS" != "Disabled" ]; then
+            echo "❌ Public network access should be disabled"
+            exit 1
+          fi
+          echo "✅ Public network access disabled"
+          
+          ZONE_REDUNDANCY=$(az acr show --name "$REGISTRY_NAME" --query "zoneRedundancy" -o tsv)
+          if [ "$ZONE_REDUNDANCY" != "Enabled" ]; then
+            echo "❌ Zone redundancy should be enabled"
+            exit 1
+          fi
+          echo "✅ Zone redundancy enabled"
+          
+          ABAC_STATUS=$(az acr show --name "$REGISTRY_NAME" --query "policies.repositoryScopedPermissions.status" -o tsv)
+          if [ "$ABAC_STATUS" != "enabled" ]; then
+            echo "❌ ABAC repository-scoped permissions should be enabled"
+            exit 1
+          fi
+          echo "✅ ABAC repository-scoped permissions enabled"
+          
+          echo "🎉 All production security validations passed"
+
+      - name: Create deployment issue
+        if: inputs.action == 'apply'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const registryName = process.env.REGISTRY_NAME;
+            const registryUrl = process.env.REGISTRY_URL;
+            
+            const issueBody = `## 🎉 Production ACR Deployment Complete
+            
+            **Registry Name**: \`${registryName}\`
+            **Registry URL**: \`${registryUrl}\`
+            **Deployment Date**: ${new Date().toISOString()}
+            
+            ### Next Steps
+            1. Update team documentation with new registry details
+            2. Configure service principals for production workloads
+            3. Set up monitoring and alerting
+            4. Test image promotion workflows
+            
+            ### Security Features Enabled
+            - ✅ Private endpoint only (no public access)
+            - ✅ Zone redundancy
+            - ✅ Multi-region geo-replication
+            - ✅ ABAC repository-scoped permissions
+            - ✅ Content trust and quarantine policies
+            
+            /label deployment,production,acr
+            `;
+            
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Production ACR Deployment - ${registryName}`,
+              body: issueBody,
+              labels: ['deployment', 'production', 'acr']
+            });

@@ -1,0 +1,80 @@
+{%- if values.enable_production_promotion %}
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-tag:
+        description: 'Source tag to promote (from preproduction environment)'
+        required: true
+        type: string
+      target-tag:
+        description: 'Target tag for production (defaults to source tag if empty)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote-to-preproduction:
+    runs-on: ubuntu-latest
+    environment: preproduction
+    
+    outputs:
+      promoted-tag: $${{ steps.promote.outputs.target-tag }}
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Promote to preproduction
+        id: promote
+        uses: DigitalInnovation/acr-image-promotion-action@v1
+        with:
+          source-registry: ${{ values.registry_url_nonprod }}
+          target-registry: ${{ values.registry_url_prod }}
+          source-environment: 'dev'
+          target-environment: 'preproduction'
+          image-name: ${{ values.name }}
+          source-tag: $${{ inputs.source-tag }}
+          target-tag: $${{ inputs.target-tag || inputs.source-tag }}
+          azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  promote-to-production:
+    needs: promote-to-preproduction
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Promote to production
+        uses: DigitalInnovation/acr-image-promotion-action/promote-same-registry@v1
+        with:
+          registry: ${{ values.registry_url_prod }}
+          source-environment: 'preproduction'
+          target-environment: 'prod'
+          image-name: ${{ values.name }}
+          source-tag: $${{ needs.promote-to-preproduction.outputs.promoted-tag }}
+          azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Notify deployment complete
+        run: |
+          echo "🎉 ${{ values.name }} has been successfully promoted to production!"
+          echo "Image: ${{ values.registry_url_prod }}/production/${{ values.name }}:$${{ needs.promote-to-preproduction.outputs.promoted-tag }}"
+{%- endif %}

@@ -1,0 +1,194 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: brightcloud-service-acr
+  title: BrightCloud Service with ACR
+  description: Create a new service with Azure Container Registry integration and automated promotion workflows
+  tags:
+    - brightcloud
+    - azure
+    - container-registry
+    - docker
+    - recommended
+spec:
+  owner: tn-cloud-9-app-framework
+  type: service
+  
+  parameters:
+    - title: Service Information
+      required:
+        - name
+        - description
+        - owner
+      properties:
+        name:
+          title: Service Name
+          type: string
+          description: 'Name of the service (will be used as image name in ACR)'
+          pattern: '^[a-z0-9]+(?:[._-][a-z0-9]+)*$'
+          ui:autofocus: true
+          ui:help: 'Must contain only lowercase letters, numbers, periods, hyphens, and underscores'
+        description:
+          title: Description
+          type: string
+          description: 'Brief description of the service'
+        owner:
+          title: Owner
+          type: string
+          description: 'Team or individual responsible for this service'
+          ui:field: OwnerPicker
+          ui:options:
+            catalogFilter:
+              kind: [Group, User]
+    
+    - title: Technology Stack
+      required:
+        - language
+        - framework
+      properties:
+        language:
+          title: Programming Language
+          type: string
+          description: 'Primary programming language for the service'
+          enum:
+            - 'nodejs'
+            - 'java'
+            - 'python'
+            - 'dotnet'
+            - 'go'
+          enumNames:
+            - 'Node.js'
+            - 'Java'
+            - 'Python'
+            - '.NET'
+            - 'Go'
+        framework:
+          title: Framework
+          type: string
+          description: 'Framework or runtime to use'
+          enum:
+            - 'express'
+            - 'fastify'
+            - 'nestjs'
+            - 'spring-boot'
+            - 'micronaut'
+            - 'flask'
+            - 'fastapi'
+            - 'django'
+            - 'aspnet-core'
+            - 'gin'
+            - 'fiber'
+          enumNames:
+            - 'Express.js'
+            - 'Fastify'
+            - 'NestJS'
+            - 'Spring Boot'
+            - 'Micronaut'
+            - 'Flask'
+            - 'FastAPI'
+            - 'Django'
+            - 'ASP.NET Core'
+            - 'Gin'
+            - 'Fiber'
+    
+    - title: Azure Container Registry Configuration
+      required:
+        - acr_environment_tier
+        - initial_environments
+      properties:
+        acr_environment_tier:
+          title: ACR Environment Tier
+          type: string
+          description: 'Which ACR tier will this service use?'
+          enum:
+            - 'nonprod'
+            - 'sandbox'
+          enumNames:
+            - 'Non-Production (pr, dev, perf environments)'
+            - 'Sandbox (experimentation only)'
+          default: 'nonprod'
+        initial_environments:
+          title: Initial Environments
+          type: array
+          description: 'Select initial environments to support'
+          items:
+            type: string
+            enum:
+              - 'pr'
+              - 'dev'
+              - 'perf'
+          uniqueItems: true
+          default: ['pr', 'dev']
+          ui:widget: checkboxes
+        enable_production_promotion:
+          title: Enable Production Promotion
+          type: boolean
+          description: 'Generate workflows for promoting to production registry'
+          default: true
+        container_port:
+          title: Container Port
+          type: integer
+          description: 'Port the container will expose'
+          default: 8080
+          minimum: 1
+          maximum: 65535
+
+    - title: Repository Configuration
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    - id: fetch
+      name: Fetch Application Template
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          name: ${{ parameters.name }}
+          description: ${{ parameters.description }}
+          owner: ${{ parameters.owner }}
+          language: ${{ parameters.language }}
+          framework: ${{ parameters.framework }}
+          acr_environment_tier: ${{ parameters.acr_environment_tier }}
+          initial_environments: ${{ parameters.initial_environments }}
+          enable_production_promotion: ${{ parameters.enable_production_promotion }}
+          container_port: ${{ parameters.container_port }}
+          destination: ${{ parameters.repoUrl | parseRepoUrl }}
+          registry_url_nonprod: 'brightcloudnonprod-abc123.azurecr.io'
+          registry_url_prod: 'brightcloudprod-def456.azurecr.io'
+          registry_url_sandbox: 'brightcloudsandbox-xyz789.azurecr.io'
+
+    - id: publish
+      name: Publish Repository
+      action: publish:github
+      input:
+        allowedHosts: ['github.com']
+        description: ${{ parameters.description }}
+        repoUrl: ${{ parameters.repoUrl }}
+        defaultBranch: main
+        gitCommitMessage: 'Initial commit: BrightCloud service with ACR integration'
+        gitAuthorName: 'Backstage Scaffolder'
+        gitAuthorEmail: 'backstage@company.com'
+
+    - id: register
+      name: Register in Software Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: '/catalog-info.yaml'
+
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}

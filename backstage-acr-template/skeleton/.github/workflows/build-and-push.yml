@@ -1,0 +1,175 @@
+name: Build and Push Container Image
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  {%- if values.acr_environment_tier == "nonprod" %}
+  REGISTRY_URL: ${{ values.registry_url_nonprod }}
+  {%- elif values.acr_environment_tier == "sandbox" %}
+  REGISTRY_URL: ${{ values.registry_url_sandbox }}
+  {%- endif %}
+  IMAGE_NAME: ${{ values.name }}
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine environment and tag
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "environment=pr" >> $GITHUB_OUTPUT
+            echo "tag=pr-${{ github.event.pull_request.number }}-${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "tag=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "tag=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "tag=dev-${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: |
+          az acr login --name ${{ values.registry_url_nonprod | replace('.azurecr.io', '') }}
+
+      - name: Build and push image
+        run: |
+          FULL_IMAGE_NAME="${REGISTRY_URL}/${{ steps.env.outputs.environment }}/${IMAGE_NAME}:${{ steps.env.outputs.tag }}"
+          
+          echo "Building image: ${FULL_IMAGE_NAME}"
+          docker build -t "${FULL_IMAGE_NAME}" .
+          
+          echo "Pushing image: ${FULL_IMAGE_NAME}"
+          docker push "${FULL_IMAGE_NAME}"
+          
+          echo "Image pushed successfully!"
+          echo "full_image_name=${FULL_IMAGE_NAME}" >> $GITHUB_OUTPUT
+        id: build
+
+      - name: Add PR comment with image details
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `## 🐳 Container Image Built
+            
+            **Image**: \`${{ steps.build.outputs.full_image_name }}\`
+            **Environment**: \`${{ steps.env.outputs.environment }}\`
+            **Tag**: \`${{ steps.env.outputs.tag }}\`
+            
+            ### 🚀 Quick Actions
+            
+            <details>
+            <summary>Promote this image</summary>
+            
+            **To promote PR to dev (after merge):**
+            \`\`\`yaml
+            - name: Promote PR to Dev
+              uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
+              with:
+                image-name: '${{ values.name }}'
+                source-tag: '${{ steps.env.outputs.tag }}'
+                target-tag: 'dev-$${{ github.sha }}'
+                azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+                azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+                azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+            \`\`\`
+            
+            **To promote to production (when ready):**
+            \`\`\`yaml
+            - name: Promote to Production
+              uses: DigitalInnovation/acr-image-promotion-action/promote-to-production@v1
+              with:
+                image-name: '${{ values.name }}'
+                source-tag: 'dev-$${{ github.sha }}'
+                azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+                azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+                azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+            \`\`\`
+            
+            </details>
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  {%- if "dev" in values.initial_environments %}
+  
+  auto-promote-to-dev:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Auto-promote to dev
+        uses: DigitalInnovation/acr-image-promotion-action/promote-pr-to-dev@v1
+        with:
+          image-name: ${{ values.name }}
+          source-tag: 'dev-$${{ github.sha }}'
+          target-tag: 'dev-$${{ github.sha }}'
+          azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  auto-promote-to-perf:
+    if: github.ref == 'refs/heads/main' && contains(fromJSON('${{ values.initial_environments | tojson }}'), 'perf')
+    needs: auto-promote-to-dev
+    runs-on: ubuntu-latest
+    environment: perf
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Promote to perf
+        uses: DigitalInnovation/acr-image-promotion-action/promote-same-registry@v1
+        with:
+          registry: ${{ values.registry_url_nonprod }}
+          source-environment: 'dev'
+          target-environment: 'perf'
+          image-name: ${{ values.name }}
+          source-tag: 'dev-$${{ github.sha }}'
+          target-tag: 'perf-$${{ github.sha }}'
+          azure-client-id: $${{ secrets.AZURE_CLIENT_ID }}
+          azure-tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+          azure-subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  {%- endif %}

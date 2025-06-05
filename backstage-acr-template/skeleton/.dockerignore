@@ -1,0 +1,76 @@
+# Version control
+.git
+.gitignore
+
+# CI/CD
+.github
+
+# Documentation
+README.md
+docs/
+*.md
+
+# Dependencies
+node_modules/
+.npm
+.pnpm-store
+
+# Build artifacts
+dist/
+build/
+target/
+bin/
+obj/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Test files
+test/
+tests/
+__tests__/
+*.test.*
+*.spec.*
+coverage/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Cache
+.cache/
+.next/
+.nuxt/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+
+# Java
+*.class
+*.jar
+*.war
+
+# .NET
+bin/
+obj/
+*.dll
+*.pdb
+
+# Go
+vendor/

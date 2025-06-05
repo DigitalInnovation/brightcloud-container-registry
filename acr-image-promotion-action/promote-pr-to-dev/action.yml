@@ -1,0 +1,73 @@
+name: 'Promote PR to Dev'
+description: 'Promotes container images from PR environment to dev environment in nonprod registry'
+author: 'BrightCloud Platform Team'
+
+inputs:
+  image-name:
+    description: 'Name of the image to promote (without registry/environment prefix)'
+    required: true
+  source-tag:
+    description: 'Source image tag to promote from PR environment'
+    required: true
+  target-tag:
+    description: 'Target image tag in dev environment (defaults to source-tag if not provided)'
+    required: false
+  nonprod-registry:
+    description: 'Non-production registry URL'
+    required: false
+    default: 'brightcloudnonprod-abc123.azurecr.io'
+  azure-client-id:
+    description: 'Azure service principal client ID (for OIDC)'
+    required: true
+  azure-tenant-id:
+    description: 'Azure tenant ID'
+    required: true
+  azure-subscription-id:
+    description: 'Azure subscription ID'
+    required: true
+  dry-run:
+    description: 'Perform validation without actual promotion'
+    required: false
+    default: 'false'
+  force:
+    description: 'Force promotion even if target image exists'
+    required: false
+    default: 'false'
+
+outputs:
+  source-image:
+    description: 'Full source image reference'
+    value: ${{ steps.promote.outputs.source-image }}
+  target-image:
+    description: 'Full target image reference'
+    value: ${{ steps.promote.outputs.target-image }}
+  promotion-result:
+    description: 'Result of the promotion operation'
+    value: ${{ steps.promote.outputs.result }}
+  target-digest:
+    description: 'SHA256 digest of the promoted image'
+    value: ${{ steps.promote.outputs.target-digest }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Promote Image from PR to Dev
+      id: promote
+      uses: ../
+      with:
+        source-registry: ${{ inputs.nonprod-registry }}
+        target-registry: ${{ inputs.nonprod-registry }}
+        source-environment: 'pr'
+        target-environment: 'dev'
+        image-name: ${{ inputs.image-name }}
+        source-tag: ${{ inputs.source-tag }}
+        target-tag: ${{ inputs.target-tag || inputs.source-tag }}
+        azure-client-id: ${{ inputs.azure-client-id }}
+        azure-tenant-id: ${{ inputs.azure-tenant-id }}
+        azure-subscription-id: ${{ inputs.azure-subscription-id }}
+        dry-run: ${{ inputs.dry-run }}
+        force: ${{ inputs.force }}
+
+branding:
+  icon: 'arrow-right'
+  color: 'blue'

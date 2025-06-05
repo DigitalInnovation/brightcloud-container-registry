@@ -1,0 +1,65 @@
+name: 'ACR Image Promotion (Advanced)'
+description: 'Promotes container images between arbitrary Azure Container Registry environments with full control'
+author: 'BrightCloud Platform Team'
+
+inputs:
+  source-registry:
+    description: 'Source ACR registry URL (e.g., brightcloudnonprod-abc123.azurecr.io)'
+    required: true
+  target-registry:
+    description: 'Target ACR registry URL (e.g., brightcloudprod-def456.azurecr.io)'
+    required: true
+  source-environment:
+    description: 'Source environment (pr, dev, perf, preproduction)'
+    required: true
+  target-environment:
+    description: 'Target environment (dev, perf, preproduction, production)'
+    required: true
+  image-name:
+    description: 'Name of the image to promote (without registry/environment prefix)'
+    required: true
+  source-tag:
+    description: 'Source image tag to promote'
+    required: true
+  target-tag:
+    description: 'Target image tag (defaults to source-tag if not provided)'
+    required: false
+  azure-client-id:
+    description: 'Azure service principal client ID (for OIDC)'
+    required: true
+  azure-tenant-id:
+    description: 'Azure tenant ID'
+    required: true
+  azure-subscription-id:
+    description: 'Azure subscription ID'
+    required: true
+  dry-run:
+    description: 'Perform validation without actual promotion'
+    required: false
+    default: 'false'
+  force:
+    description: 'Force promotion even if target image exists'
+    required: false
+    default: 'false'
+
+outputs:
+  source-image:
+    description: 'Full source image reference'
+    value: ${{ steps.promote.outputs.source-image }}
+  target-image:
+    description: 'Full target image reference'
+    value: ${{ steps.promote.outputs.target-image }}
+  promotion-result:
+    description: 'Result of the promotion operation'
+    value: ${{ steps.promote.outputs.result }}
+  target-digest:
+    description: 'SHA256 digest of the promoted image'
+    value: ${{ steps.promote.outputs.target-digest }}
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
