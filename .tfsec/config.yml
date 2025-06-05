@@ -1,0 +1,144 @@
+# tfsec configuration file
+# Documentation: https://aquasecurity.github.io/tfsec/
+
+# Severity levels to check
+severity: 
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+  - LOW
+
+# Output format
+format: default
+
+# Exclude specific checks
+exclude:
+  # Azure specific exclusions that may not apply to our use case
+  - azure-storage-default-action-deny          # We configure this explicitly per environment
+  - azure-storage-queue-services-logging-enabled # Not applicable for ACR
+  - azure-storage-use-secure-tls-policy        # Not applicable for ACR
+  - azure-keyvault-ensure-secret-expiry         # Secrets rotation handled by external process
+  
+  # General exclusions for infrastructure as code
+  - general-secrets-sensitive-in-variable      # We use secure parameter handling
+  - general-secrets-sensitive-in-local         # We use secure local value handling
+
+# Include specific paths
+include:
+  - terraform-azurerm-acr-platform/modules/
+  - terraform-azurerm-acr-platform/environments/
+
+# Exclude specific paths
+exclude-paths:
+  - terraform-azurerm-acr-platform/test/
+  - terraform-azurerm-acr-platform/.terraform/
+  - terraform-azurerm-acr-platform/examples/
+
+# Custom rules configuration
+rules:
+  # Azure Container Registry specific rules
+  - rule-id: azure-container-registry-admin-disabled
+    severity: HIGH
+    message: "Admin user should be disabled for production ACR instances"
+    
+  - rule-id: azure-container-registry-public-access-disabled
+    severity: CRITICAL
+    message: "Public network access should be disabled for production ACR instances"
+    
+  - rule-id: azure-container-registry-zone-redundancy-enabled
+    severity: MEDIUM
+    message: "Zone redundancy should be enabled for Premium ACR instances"
+
+# Custom check configuration
+custom-checks:
+  - check-id: BCR001
+    name: "Ensure ACR has appropriate retention policy"
+    description: "Container registry should have retention policy configured"
+    severity: MEDIUM
+    frameworks:
+      - terraform
+    scope:
+      provider: azurerm
+      resource: azurerm_container_registry
+    conditions:
+      - path: "retention_policy.0.enabled"
+        op: equals
+        value: true
+
+  - check-id: BCR002  
+    name: "Ensure ACR Premium features are enabled correctly"
+    description: "Premium SKU should have advanced features enabled"
+    severity: MEDIUM
+    frameworks:
+      - terraform
+    scope:
+      provider: azurerm
+      resource: azurerm_container_registry
+    conditions:
+      - path: "sku"
+        op: equals
+        value: "Premium"
+      - path: "trust_policy.0.enabled"
+        op: equals
+        value: true
+
+  - check-id: BCR003
+    name: "Ensure environment-specific naming convention"
+    description: "Registry names should follow environment naming convention"
+    severity: LOW
+    frameworks:
+      - terraform
+    scope:
+      provider: azurerm
+      resource: azurerm_container_registry
+    conditions:
+      - path: "name"
+        op: regex_match
+        value: "^(brightcloud|acr).*"
+
+# Plugin configuration for additional security checks
+plugins:
+  - name: "azure-security"
+    enabled: true
+    config:
+      check-networking: true
+      check-encryption: true
+      check-identity: true
+      
+  - name: "terraform-best-practices"
+    enabled: true
+    config:
+      check-naming: true
+      check-tagging: true
+      check-versioning: true
+
+# Minimum severity to fail the check
+minimum-severity: MEDIUM
+
+# Configuration for different environments
+environment-configs:
+  production:
+    minimum-severity: HIGH
+    exclude:
+      - azure-container-registry-public-access-enabled  # Allow for non-production
+    
+  development:
+    minimum-severity: MEDIUM
+    exclude:
+      - azure-container-registry-zone-redundancy-disabled  # Not required for dev
+    
+  testing:
+    minimum-severity: LOW
+    exclude: []
+
+# Output configuration
+output:
+  include-passed: false
+  include-ignored: true
+  include-statistics: true
+  
+# Concurrency settings
+concurrency: 4
+
+# Timeout settings (in seconds)
+timeout: 300
