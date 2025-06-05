@@ -10,6 +10,9 @@ jobs:
   test-promote-to-production:
     name: Test Promote to Production Action
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -29,12 +32,18 @@ jobs:
 
       - name: Verify production promotion validation
         run: |
-          echo "Production promotion test result: ${{ steps.test-prod.outcome }}"
+          echo "Production promotion test result: $OUTCOME"
           # Should pass validation but fail on Azure auth (expected in test)
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.test-prod.outcome }}
 
   test-promote-pr-to-dev:
     name: Test Promote PR to Dev Action
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -55,11 +64,17 @@ jobs:
 
       - name: Verify PR to dev promotion validation
         run: |
-          echo "PR to dev promotion test result: ${{ steps.test-pr-dev.outcome }}"
+          echo "PR to dev promotion test result: $OUTCOME"
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.test-pr-dev.outcome }}
 
   test-promote-same-registry:
     name: Test Promote Same Registry Action
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -82,11 +97,17 @@ jobs:
 
       - name: Verify same registry promotion validation
         run: |
-          echo "Same registry promotion test result: ${{ steps.test-same-registry.outcome }}"
+          echo "Same registry promotion test result: $OUTCOME"
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.test-same-registry.outcome }}
 
   test-advanced-action:
     name: Test Advanced Action
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -110,11 +131,17 @@ jobs:
 
       - name: Verify advanced action validation
         run: |
-          echo "Advanced action test result: ${{ steps.test-advanced.outcome }}"
+          echo "Advanced action test result: $OUTCOME"
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.test-advanced.outcome }}
 
   test-invalid-scenarios:
     name: Test Invalid Promotion Scenarios
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     
     steps:
       - name: Checkout
@@ -137,10 +164,11 @@ jobs:
         continue-on-error: true
 
       - name: Verify invalid promotion failed
-        if: steps.test-invalid-path.outcome != 'failure'
+        if: ${{ steps.test-invalid-path.outcome != 'failure' }}
         run: |
           echo "Expected invalid promotion to fail, but it didn't"
           exit 1
+        shell: bash
 
       - name: Test sandbox promotion (should fail)
         id: test-sandbox
@@ -159,7 +187,8 @@ jobs:
         continue-on-error: true
 
       - name: Verify sandbox promotion failed
-        if: steps.test-sandbox.outcome != 'failure'
+        if: ${{ steps.test-sandbox.outcome != 'failure' }}
         run: |
           echo "Expected sandbox promotion to fail, but it didn't"
           exit 1
+        shell: bash
