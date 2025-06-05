@@ -27,6 +27,9 @@ jobs:
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
@@ -39,10 +42,15 @@ jobs:
 
       - name: Determine Version
         id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_PRERELEASE: ${{ github.event.inputs.pre_release }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-            IS_PRERELEASE="${{ github.event.inputs.pre_release }}"
+          if [ "$EVENT_NAME" == "workflow_dispatch" ]; then
+            VERSION="$INPUT_VERSION"
+            IS_PRERELEASE="$INPUT_PRERELEASE"
           else
             VERSION="${GITHUB_REF#refs/tags/}"
             # Check if version contains pre-release identifiers
@@ -59,31 +67,43 @@ jobs:
             exit 1
           fi
           
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "${GITHUB_OUTPUT}"
+          echo "is_prerelease=$IS_PRERELEASE" >> "${GITHUB_OUTPUT}"
           echo "::notice::Releasing version $VERSION (prerelease: $IS_PRERELEASE)"
 
       - name: Check Tag Exists
-        if: github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          TAG_VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if git rev-parse "refs/tags/${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-            echo "::error::Tag ${{ steps.version.outputs.version }} already exists"
+          if git rev-parse "refs/tags/$TAG_VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag $TAG_VERSION already exists"
             exit 1
           fi
 
   test:
     name: Run Tests
+    timeout-minutes: 30
+    permissions:
+      contents: read
     uses: ./.github/workflows/terraform-quality.yml
     secrets: inherit
 
   test-actions:
     name: Run Action Tests
+    timeout-minutes: 30
+    permissions:
+      contents: read
     uses: ./.github/workflows/action-test.yml
     secrets: inherit
 
   build-terraform-docs:
     name: Build Terraform Documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     needs: [validate]
     
     steps:
@@ -92,6 +112,7 @@ jobs:
 
       - name: Generate Terraform Documentation
         working-directory: terraform-azurerm-acr-platform
+        shell: bash
         run: |
           # Generate documentation for all modules
           for module in modules/*/; do
@@ -105,10 +126,14 @@ jobs:
           name: terraform-docs
           path: terraform-azurerm-acr-platform/
           retention-days: 7
+          if-no-files-found: error
 
   build-action:
     name: Build Action
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     needs: [validate, test-actions]
     
     steps:
@@ -124,16 +149,20 @@ jobs:
 
       - name: Install dependencies
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm ci
 
       - name: Update version
         working-directory: acr-image-promotion-action
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
           npm version "${VERSION#v}" --no-git-tag-version
 
       - name: Build and package
         working-directory: acr-image-promotion-action
+        shell: bash
         run: npm run package
 
       - name: Upload built action
@@ -145,10 +174,15 @@ jobs:
             acr-image-promotion-action/action.yml
             acr-image-promotion-action/package.json
           retention-days: 7
+          if-no-files-found: error
 
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
     needs: [validate, test, test-actions, build-terraform-docs, build-action]
     
     steps:
@@ -164,8 +198,11 @@ jobs:
 
       - name: Generate Release Notes
         id: release-notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           
           echo "# Release $VERSION" > release_notes.md
@@ -203,7 +240,7 @@ jobs:
           echo "- Team-based organization and workflows" >> release_notes.md
           echo "" >> release_notes.md
           
-          if [ "${{ needs.validate.outputs.is_prerelease }}" == "true" ]; then
+          if [ "$IS_PRERELEASE" == "true" ]; then
             echo "## ⚠️ Pre-release Notice" >> release_notes.md
             echo "" >> release_notes.md
             echo "This is a pre-release version and may contain experimental features." >> release_notes.md
@@ -211,15 +248,21 @@ jobs:
           fi
 
       - name: Create GitHub Tag
-        if: github.event_name == 'workflow_dispatch'
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ needs.validate.outputs.version }}" -m "Release ${{ needs.validate.outputs.version }}"
-          git push origin "${{ needs.validate.outputs.version }}"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
 
       - name: Create GitHub Release
         uses: actions/github-script@v7
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          IS_PRERELEASE: ${{ needs.validate.outputs.is_prerelease }}
         with:
           script: |
             const fs = require('fs');
@@ -228,11 +271,11 @@ jobs:
             const release = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: '${{ needs.validate.outputs.version }}',
-              name: 'Release ${{ needs.validate.outputs.version }}',
+              tag_name: process.env.VERSION,
+              name: `Release ${process.env.VERSION}`,
               body: releaseNotes,
               draft: false,
-              prerelease: ${{ needs.validate.outputs.is_prerelease }}
+              prerelease: process.env.IS_PRERELEASE === 'true'
             });
             
             console.log(`Created release: ${release.data.html_url}`);
@@ -264,8 +307,11 @@ jobs:
   update-major-tag:
     name: Update Major Version Tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     needs: [validate, create-release]
-    if: needs.validate.outputs.is_prerelease == 'false'
+    if: ${{ needs.validate.outputs.is_prerelease == 'false' }}
     
     steps:
       - name: Checkout
@@ -274,8 +320,10 @@ jobs:
           fetch-depth: 0
 
       - name: Update Major Version Tag
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
           MAJOR_VERSION=$(echo "$VERSION" | sed 's/v\([0-9]*\)\..*/v\1/')
           
           git config user.name "github-actions[bot]"
@@ -288,18 +336,28 @@ jobs:
   notify:
     name: Notify Release
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
     needs: [validate, create-release]
-    if: always()
+    if: ${{ !cancelled() }}
     
     steps:
       - name: Notify Success
-        if: needs.create-release.result == 'success'
+        if: ${{ needs.create-release.result == 'success' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          echo "::notice::Successfully released ${{ needs.validate.outputs.version }}"
-          echo "Release is available at: https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate.outputs.version }}"
+          echo "::notice::Successfully released $VERSION"
+          echo "Release is available at: https://github.com/$REPOSITORY/releases/tag/$VERSION"
 
       - name: Notify Failure
-        if: needs.create-release.result == 'failure'
+        if: ${{ needs.create-release.result == 'failure' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
         run: |
-          echo "::error::Release ${{ needs.validate.outputs.version }} failed"
+          echo "::error::Release $VERSION failed"
           exit 1
