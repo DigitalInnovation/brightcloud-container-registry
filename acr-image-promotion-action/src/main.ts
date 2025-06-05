@@ -2,6 +2,7 @@ import * as core from '@actions/core';
 import { ImagePromoter } from './image-promoter';
 import { PromotionValidator, SecurityValidationConfig } from './promotion-validator';
 import { AzureAuthenticator } from './azure-authenticator';
+import { logVersionInfo } from './version';
 
 interface PromotionInputs {
   sourceRegistry: string;
@@ -23,6 +24,9 @@ interface PromotionInputs {
 
 async function run(): Promise<void> {
   try {
+    // Log version information
+    logVersionInfo();
+    
     // Parse inputs
     const inputs: PromotionInputs = {
       sourceRegistry: core.getInput('source-registry', { required: true }),

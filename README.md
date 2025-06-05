@@ -1,5 +1,13 @@
 # BrightCloud Container Registry Platform
 
+[![Build](https://github.com/DigitalInnovation/brightcloud-container-registry/workflows/CI/badge.svg)](https://github.com/DigitalInnovation/brightcloud-container-registry/actions/workflows/ci.yml)
+[![Security](https://github.com/DigitalInnovation/brightcloud-container-registry/workflows/Security/badge.svg)](https://github.com/DigitalInnovation/brightcloud-container-registry/actions/workflows/security.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=brightcloud-container-registry&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=brightcloud-container-registry)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=brightcloud-container-registry&metric=coverage)](https://sonarcloud.io/summary/new_code?id=brightcloud-container-registry)
+[![Reliability Rating](https://sonarcloud.io/api/project_badges/measure?project=brightcloud-container-registry&metric=reliability_rating)](https://sonarcloud.io/summary/new_code?id=brightcloud-container-registry)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=brightcloud-container-registry&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=brightcloud-container-registry)
+[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=brightcloud-container-registry&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=brightcloud-container-registry)
+
 A comprehensive platform for managing Azure Container Registry (ACR) infrastructure with automated image promotion and team-based access control.
 
 ## 🏗️ Repository Structure
@@ -119,6 +127,3 @@ teams = {
 
 Please read our contributing guidelines and submit pull requests for any improvements.
 
-## 📄 License
-
-MIT License - see individual component licenses for details.

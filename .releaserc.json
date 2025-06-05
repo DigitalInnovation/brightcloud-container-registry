@@ -1,0 +1,93 @@
+{
+  "branches": [
+    "main",
+    "next"
+  ],
+  "plugins": [
+    [
+      "@semantic-release/commit-analyzer",
+      {
+        "preset": "conventionalcommits",
+        "releaseRules": [
+          {"type": "feat", "release": "minor"},
+          {"type": "fix", "release": "patch"},
+          {"type": "perf", "release": "patch"},
+          {"type": "revert", "release": "patch"},
+          {"type": "docs", "release": "patch"},
+          {"type": "style", "release": false},
+          {"type": "refactor", "release": "patch"},
+          {"type": "test", "release": false},
+          {"type": "build", "release": "patch"},
+          {"type": "ci", "release": false},
+          {"type": "chore", "release": false},
+          {"scope": "no-release", "release": false}
+        ]
+      }
+    ],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {
+          "types": [
+            {"type": "feat", "section": "🚀 Features"},
+            {"type": "fix", "section": "🐛 Bug Fixes"},
+            {"type": "perf", "section": "⚡ Performance Improvements"},
+            {"type": "revert", "section": "⏪ Reverts"},
+            {"type": "docs", "section": "📚 Documentation"},
+            {"type": "refactor", "section": "♻️ Code Refactoring"},
+            {"type": "build", "section": "🔧 Build System"},
+            {"type": "security", "section": "🔒 Security"}
+          ]
+        }
+      }
+    ],
+    [
+      "@semantic-release/changelog",
+      {
+        "changelogFile": "CHANGELOG.md"
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "echo '${nextRelease.version}' > VERSION && echo 'export const VERSION = \"${nextRelease.version}\";' > acr-image-promotion-action/src/version-info.ts"
+      }
+    ],
+    [
+      "@semantic-release/npm",
+      {
+        "pkgRoot": "acr-image-promotion-action",
+        "npmPublish": false
+      }
+    ],
+    [
+      "@semantic-release/git",
+      {
+        "assets": [
+          "VERSION",
+          "CHANGELOG.md",
+          "acr-image-promotion-action/package.json",
+          "acr-image-promotion-action/package-lock.json",
+          "acr-image-promotion-action/src/version-info.ts"
+        ],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "assets": [
+          {
+            "path": "acr-image-promotion-action/dist/**",
+            "name": "acr-image-promotion-action-${nextRelease.version}.zip"
+          }
+        ],
+        "successComment": false,
+        "failComment": false,
+        "failTitle": false,
+        "labels": ["released"]
+      }
+    ]
+  ]
+}

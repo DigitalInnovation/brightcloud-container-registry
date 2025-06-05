@@ -1,0 +1,87 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base",
+    "security:openssf-scorecard"
+  ],
+  "timezone": "Europe/London",
+  "schedule": [
+    "before 6am on Monday"
+  ],
+  "prHourlyLimit": 3,
+  "prConcurrentLimit": 10,
+  "labels": [
+    "dependencies"
+  ],
+  "assignees": [
+    "tn-cloud-9-app-framework"
+  ],
+  "reviewers": [
+    "tn-cloud-9-app-framework"
+  ],
+  "commitMessagePrefix": "chore(deps): ",
+  "semanticCommits": "enabled",
+  "rangeStrategy": "bump",
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["*"],
+      "matchUpdateTypes": ["major"],
+      "labels": ["dependencies", "major-update"],
+      "reviewers": ["tn-cloud-9-app-framework"],
+      "assignees": ["tn-cloud-9-app-framework"]
+    },
+    {
+      "matchPackagePatterns": ["*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "labels": ["dependencies", "auto-merge"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "labels": ["dependencies", "dev-dependencies"]
+    },
+    {
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["dependencies"],
+      "labels": ["dependencies", "production-dependencies"]
+    },
+    {
+      "matchManagers": ["terraform"],
+      "labels": ["dependencies", "terraform"],
+      "reviewers": ["tn-cloud-9-app-framework"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "labels": ["dependencies", "github-actions"],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": ["docker"],
+      "labels": ["dependencies", "docker"],
+      "reviewers": ["tn-cloud-9-app-framework"]
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "assignees": ["tn-cloud-9-app-framework"],
+    "reviewers": ["tn-cloud-9-app-framework"],
+    "labels": ["security", "vulnerability"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on Monday"],
+    "commitMessageAction": "Lock file maintenance"
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^VERSION$"],
+      "matchStrings": ["(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "version",
+      "datasourceTemplate": "npm"
+    }
+  ]
+}

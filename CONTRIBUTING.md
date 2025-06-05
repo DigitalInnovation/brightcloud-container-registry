@@ -23,9 +23,9 @@ All code changes happen through pull requests. Pull requests are the best way to
 5. Make sure your code lints.
 6. Issue that pull request!
 
-## Any contributions you make will be under the MIT Software License
+## Contribution Agreement
 
-In short, when you submit code changes, your submissions are understood to be under the same [MIT License](LICENSE) that covers the project. Feel free to contact the maintainers if that's a concern.
+By submitting code changes, your submissions are understood to be made available for use within this project. Feel free to contact the maintainers if you have any concerns about contributions.
 
 ## Report bugs using GitHub's [issues](https://github.com/DigitalInnovation/brightcloud-container-registry/issues)
 
@@ -160,8 +160,4 @@ If you discover a security vulnerability, please email security@brightcloud.exam
 ## Community
 
 - Join our [discussions](https://github.com/DigitalInnovation/brightcloud-container-registry/discussions)
-- Read our [Code of Conduct](CODE_OF_CONDUCT.md)
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
+- Follow our contribution guidelines outlined above

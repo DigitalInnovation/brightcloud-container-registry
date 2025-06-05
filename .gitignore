@@ -1,0 +1,235 @@
+# =============================================================================
+# BrightCloud Container Registry Platform - Git Ignore Configuration
+# =============================================================================
+
+# Operating System Files
+# ======================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.tmp
+*.temp
+
+# IDE and Editor Files
+# ===================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.metadata/
+*.sublime-project
+*.sublime-workspace
+
+# Node.js and npm
+# ===============
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.npm
+.eslintcache
+.yarn-integrity
+.pnpm-debug.log*
+
+# TypeScript
+# ==========
+*.tsbuildinfo
+dist/
+lib/
+build/
+coverage/
+.nyc_output/
+junit.xml
+
+# Terraform
+# =========
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+*.tfstate
+*.tfstate.backup
+.terraformrc
+terraform.rc
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+
+# Azure
+# =====
+.azure/
+azure-pipelines-variables.yml
+*.publishsettings
+*.azurePubxml
+*.azureProfile
+
+# Security and Secrets
+# ===================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.yaml
+secrets.yml
+.secrets
+.secrets.baseline
+
+# Logs and Runtime
+# ================
+logs/
+*.log
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Testing
+# =======
+coverage/
+.nyc_output/
+.coverage
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+jest_*
+test-results/
+
+# Documentation Build
+# ===================
+docs/_build/
+site/
+.mkdocs/
+
+# Package Managers
+# ================
+package-lock.json
+yarn.lock
+Pipfile.lock
+poetry.lock
+Composer.lock
+Gemfile.lock
+
+# Container and Docker
+# ===================
+.dockerignore
+docker-compose.override.yml
+
+# Backup and Archive Files
+# ========================
+*.bak
+*.backup
+*.old
+*.orig
+*.save
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.rar
+
+# Cloud and Infrastructure
+# ========================
+.pulumi/
+.serverless/
+.sam/
+.amplify/
+.vercel/
+.netlify/
+
+# Local Development
+# =================
+.local/
+local/
+tmp/
+temp/
+.cache/
+
+# Platform Specific
+# =================
+# ACR Image Promotion Action
+acr-image-promotion-action/dist/
+acr-image-promotion-action/lib/
+acr-image-promotion-action/node_modules/
+acr-image-promotion-action/coverage/
+acr-image-promotion-action/*.tsbuildinfo
+
+# Terraform Modules
+terraform-azurerm-acr-platform/.terraform/
+terraform-azurerm-acr-platform/*.tfstate*
+terraform-azurerm-acr-platform/*.tfplan
+terraform-azurerm-acr-platform/crash.log
+terraform-azurerm-acr-platform/crash.*.log
+
+# Backstage Templates
+backstage-acr-template/skeleton/.git/
+backstage-acr-template/skeleton/node_modules/
+
+# Test Artifacts
+**/*test.db
+**/*test.sqlite
+**/*test.json
+test-output/
+test-reports/
+
+# Generated Files
+CHANGELOG.md
+version.json
+build-info.json
+release-notes.md
+
+# Security Scanning Results
+security-scan-results/
+vulnerability-reports/
+codeql-results/
+semgrep-results/
+trivy-results/
+
+# Monitoring and Observability
+metrics/
+traces/
+logs/
+apm/
+
+# Compliance and Audit
+audit-logs/
+compliance-reports/
+penetration-test-results/
+
+# Performance Testing
+performance-results/
+load-test-results/
+benchmark-results/
+
+# Terraform Documentation (auto-generated)
+terraform-azurerm-acr-platform/modules/*/README.md
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+ehthumbs_vista.db
+
+# Linux
+*~
