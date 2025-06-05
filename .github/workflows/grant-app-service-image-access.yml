@@ -61,6 +61,10 @@ jobs:
   validate-access-request:
     name: Validate Access Request
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       validation_passed: ${{ steps.validate.outputs.validation_passed }}
       identity_type: ${{ steps.validate.outputs.identity_type }}
@@ -76,9 +80,13 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Validate team has registry access
+        shell: bash
+        env:
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
+          ENVIRONMENT_INPUT: ${{ github.event.inputs.environment }}
         run: |
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
-          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          TEAM_NAME="$TEAM_NAME_INPUT"
+          ENVIRONMENT="$ENVIRONMENT_INPUT"
           
           # Determine registry based on environment
           case $ENVIRONMENT in
@@ -98,7 +106,7 @@ jobs:
           esac
           
           echo "Registry: $REGISTRY_NAME"
-          echo "registry_name=$REGISTRY_NAME" >> $GITHUB_ENV
+          echo "registry_name=$REGISTRY_NAME" >> "$GITHUB_ENV"
           
           # Check if team has a scope map for this environment
           SCOPE_MAP_EXISTS=$(az acr scope-map list --registry "$REGISTRY_NAME" --query "[?contains(name, '${ENVIRONMENT}') && contains(name, '${TEAM_NAME}')].name" -o tsv | wc -l)
@@ -113,9 +121,13 @@ jobs:
 
       - name: Validate identity access and ownership
         id: validate-identity
+        shell: bash
+        env:
+          MANAGED_ID_INPUT: ${{ github.event.inputs.managed_identity_id }}
+          SP_ID_INPUT: ${{ github.event.inputs.service_principal_id }}
         run: |
-          MANAGED_ID="${{ github.event.inputs.managed_identity_id }}"
-          SP_ID="${{ github.event.inputs.service_principal_id }}"
+          MANAGED_ID="$MANAGED_ID_INPUT"
+          SP_ID="$SP_ID_INPUT"
           
           if [[ -n "$MANAGED_ID" && -n "$SP_ID" ]]; then
             echo "❌ Cannot specify both managed identity and service principal"
@@ -143,8 +155,8 @@ jobs:
             
             IDENTITY_NAME=$(az ad sp show --id "$MANAGED_ID" --query "displayName" -o tsv)
             echo "✅ Managed identity validated: $IDENTITY_NAME ($MANAGED_ID)"
-            echo "identity_type=managed-identity" >> $GITHUB_OUTPUT
-            echo "identity_id=$MANAGED_ID" >> $GITHUB_OUTPUT
+            echo "identity_type=managed-identity" >> "$GITHUB_OUTPUT"
+            echo "identity_id=$MANAGED_ID" >> "$GITHUB_OUTPUT"
             
           elif [[ -n "$SP_ID" ]]; then
             echo "🔍 Validating service principal access..."
@@ -157,15 +169,20 @@ jobs:
             
             SP_NAME=$(az ad sp show --id "$SP_ID" --query "displayName" -o tsv)
             echo "✅ Service principal validated: $SP_NAME ($SP_ID)"
-            echo "identity_type=service-principal" >> $GITHUB_OUTPUT
-            echo "identity_id=$SP_ID" >> $GITHUB_OUTPUT
+            echo "identity_type=service-principal" >> "$GITHUB_OUTPUT"
+            echo "identity_id=$SP_ID" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate image names
+        shell: bash
+        env:
+          IMAGE_NAMES_INPUT: ${{ github.event.inputs.image_names }}
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
+          ENVIRONMENT_INPUT: ${{ github.event.inputs.environment }}
         run: |
-          IMAGE_NAMES="${{ github.event.inputs.image_names }}"
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
-          ENVIRONMENT="${{ github.event.inputs.environment }}"
+          IMAGE_NAMES="$IMAGE_NAMES_INPUT"
+          TEAM_NAME="$TEAM_NAME_INPUT"
+          ENVIRONMENT="$ENVIRONMENT_INPUT"
           
           if [[ "$IMAGE_NAMES" == "*" ]]; then
             echo "✅ Wildcard access requested for all team images"
@@ -192,13 +209,20 @@ jobs:
 
       - name: Set validation outputs
         id: validate
+        shell: bash
+        env:
+          REGISTRY_NAME: ${{ env.registry_name }}
         run: |
-          echo "validation_passed=true" >> $GITHUB_OUTPUT
-          echo "registry_name=${{ env.registry_name }}" >> $GITHUB_OUTPUT
+          echo "validation_passed=true" >> "$GITHUB_OUTPUT"
+          echo "registry_name=$REGISTRY_NAME" >> "$GITHUB_OUTPUT"
 
   grant-access:
     name: Grant Registry Access
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
     needs: validate-access-request
     if: needs.validate-access-request.outputs.validation_passed == 'true'
     
@@ -212,12 +236,19 @@ jobs:
 
       - name: Create custom scope map for app access
         id: create-scope-map
+        shell: bash
+        env:
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
+          APP_NAME_INPUT: ${{ github.event.inputs.app_service_name }}
+          ENVIRONMENT_INPUT: ${{ github.event.inputs.environment }}
+          IMAGE_NAMES_INPUT: ${{ github.event.inputs.image_names }}
+          REGISTRY_NAME_INPUT: ${{ needs.validate-access-request.outputs.registry_name }}
         run: |
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
-          APP_NAME="${{ github.event.inputs.app_service_name }}"
-          ENVIRONMENT="${{ github.event.inputs.environment }}"
-          IMAGE_NAMES="${{ github.event.inputs.image_names }}"
-          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
+          TEAM_NAME="$TEAM_NAME_INPUT"
+          APP_NAME="$APP_NAME_INPUT"
+          ENVIRONMENT="$ENVIRONMENT_INPUT"
+          IMAGE_NAMES="$IMAGE_NAMES_INPUT"
+          REGISTRY_NAME="$REGISTRY_NAME_INPUT"
           
           # Generate scope map name
           SCOPE_MAP_NAME="${ENVIRONMENT}-${TEAM_NAME}-${APP_NAME}-readonly"
@@ -266,14 +297,21 @@ jobs:
           fi
           
           echo "✅ Scope map created: $SCOPE_MAP_NAME"
-          echo "scope_map_name=$SCOPE_MAP_NAME" >> $GITHUB_OUTPUT
+          echo "scope_map_name=$SCOPE_MAP_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Assign AcrPull role to identity
+        shell: bash
+        env:
+          IDENTITY_ID_INPUT: ${{ needs.validate-access-request.outputs.identity_id }}
+          IDENTITY_TYPE_INPUT: ${{ needs.validate-access-request.outputs.identity_type }}
+          REGISTRY_NAME_INPUT: ${{ needs.validate-access-request.outputs.registry_name }}
+          SCOPE_MAP_NAME_INPUT: ${{ steps.create-scope-map.outputs.scope_map_name }}
+          APP_SERVICE_NAME: ${{ github.event.inputs.app_service_name }}
         run: |
-          IDENTITY_ID="${{ needs.validate-access-request.outputs.identity_id }}"
-          IDENTITY_TYPE="${{ needs.validate-access-request.outputs.identity_type }}"
-          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
-          SCOPE_MAP_NAME="${{ steps.create-scope-map.outputs.scope_map_name }}"
+          IDENTITY_ID="$IDENTITY_ID_INPUT"
+          IDENTITY_TYPE="$IDENTITY_TYPE_INPUT"
+          REGISTRY_NAME="$REGISTRY_NAME_INPUT"
+          SCOPE_MAP_NAME="$SCOPE_MAP_NAME_INPUT"
           
           echo "🔐 Assigning AcrPull role to $IDENTITY_TYPE: $IDENTITY_ID"
           
@@ -285,14 +323,18 @@ jobs:
             --assignee "$IDENTITY_ID" \
             --role "AcrPull" \
             --scope "$REGISTRY_ID" \
-            --description "Image pull access for ${{ github.event.inputs.app_service_name }} via scope map $SCOPE_MAP_NAME"
+            --description "Image pull access for $APP_SERVICE_NAME via scope map $SCOPE_MAP_NAME"
           
           echo "✅ Role assignment created successfully"
 
       - name: Verify access grant
+        shell: bash
+        env:
+          IDENTITY_ID_INPUT: ${{ needs.validate-access-request.outputs.identity_id }}
+          REGISTRY_NAME_INPUT: ${{ needs.validate-access-request.outputs.registry_name }}
         run: |
-          IDENTITY_ID="${{ needs.validate-access-request.outputs.identity_id }}"
-          REGISTRY_NAME="${{ needs.validate-access-request.outputs.registry_name }}"
+          IDENTITY_ID="$IDENTITY_ID_INPUT"
+          REGISTRY_NAME="$REGISTRY_NAME_INPUT"
           
           echo "🔍 Verifying access grant..."
           
@@ -309,8 +351,11 @@ jobs:
   create-tracking-issue:
     name: Create Tracking Issue
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
     needs: [validate-access-request, grant-access]
-    if: always()
+    if: '!cancelled()'
     
     steps:
       - name: Create success issue
@@ -337,37 +382,39 @@ jobs:
             **Registry Access Pattern:**
             \`\`\`
             Registry: ${{ needs.validate-access-request.outputs.registry_name }}
-            ${{ github.event.inputs.image_names === '*' && 
-              \`Pattern: ${{ github.event.inputs.environment }}/${{ github.event.inputs.team_name }}/**\` ||
-              github.event.inputs.image_names.split(',').map(img => 
-                \`Pattern: ${{ github.event.inputs.environment }}/${{ github.event.inputs.team_name }}/\${img.trim()}/**\`
-              ).join('\\n')
+            ${{ github.event.inputs.image_names == '*' && 
+              format('Pattern: {0}/{1}/**', github.event.inputs.environment, github.event.inputs.team_name) ||
+              join(
+                github.event.inputs.image_names.split(',').map(img => 
+                  format('Pattern: {0}/{1}/{2}/**', github.event.inputs.environment, github.event.inputs.team_name, img.trim())
+                ), '\n'
+              )
             }}
             \`\`\`
 
             **Usage Instructions:**
             Your application can now pull images using the assigned managed identity or service principal:
 
-            ${{ needs.validate-access-request.outputs.identity_type === 'managed-identity' && \`
+            ${{ needs.validate-access-request.outputs.identity_type == 'managed-identity' && '
             **For Managed Identity:**
             1. Ensure your app service has the managed identity assigned
-            2. Use Azure's default credential chain for authentication
+            2. Use Azure''s default credential chain for authentication
             3. Images will authenticate automatically when pulling
-            \` || \`
+            ' || '
             **For Service Principal:**
             1. Configure your application with the service principal credentials
             2. Use Azure CLI or SDK authentication
             3. Authenticate before pulling images
-            \`}}
+            '}}
 
             **Access Review:**
             - **Justification:** ${{ github.event.inputs.access_justification }}
             - **Duration:** ${{ github.event.inputs.access_duration }}
             - **Requestor:** ${{ github.event.inputs.requestor_email }}
 
-            ${{ github.event.inputs.access_duration.includes('temporary') && \`
+            ${{ contains(github.event.inputs.access_duration, 'temporary') && '
             ⚠️ **Temporary Access**: This access is marked as temporary. Please review and remove when no longer needed.
-            \` || '' }}
+            ' || '' }}
 
             **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -418,8 +465,10 @@ jobs:
   notify-requestor:
     name: Notify Requestor
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
     needs: [validate-access-request, grant-access]
-    if: always()
+    if: '!cancelled()'
     
     steps:
       - name: Send notification email

@@ -58,6 +58,10 @@ jobs:
   security-validation:
     name: Security Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
     outputs:
       validation_passed: ${{ steps.validate.outputs.validation_passed }}
       validated_environments: ${{ steps.validate.outputs.validated_environments }}
@@ -75,8 +79,11 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Validate team name format
+        shell: bash
+        env:
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
         run: |
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
+          TEAM_NAME="$TEAM_NAME_INPUT"
           if [[ ! "$TEAM_NAME" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
             echo "❌ Invalid team name format. Must be lowercase alphanumeric with hyphens, underscores, or periods."
             exit 1
@@ -91,8 +98,12 @@ jobs:
 
       - name: Validate Azure AD Group access
         id: validate-ad-group
+        shell: bash
+        env:
+          GROUP_ID_INPUT: ${{ github.event.inputs.azure_ad_group_id }}
+          REQUESTOR_UPN_INPUT: ${{ github.event.inputs.requestor_email }}
         run: |
-          GROUP_ID="${{ github.event.inputs.azure_ad_group_id }}"
+          GROUP_ID="$GROUP_ID_INPUT"
           
           # Check if group exists and requestor has access
           if ! az ad group show --group "$GROUP_ID" --output none 2>/dev/null; then
@@ -111,7 +122,7 @@ jobs:
           echo "  - Member Count: $GROUP_MEMBERS"
           
           # Verify requestor has appropriate permissions (member or owner)
-          REQUESTOR_UPN="${{ github.event.inputs.requestor_email }}"
+          REQUESTOR_UPN="$REQUESTOR_UPN_INPUT"
           REQUESTOR_IN_GROUP=$(az ad group member list --group "$GROUP_ID" --query "[?mail=='$REQUESTOR_UPN' || userPrincipalName=='$REQUESTOR_UPN'].id" -o tsv | wc -l)
           
           if [[ $REQUESTOR_IN_GROUP -eq 0 ]]; then
@@ -128,8 +139,14 @@ jobs:
 
       - name: Validate Service Principal access
         id: validate-service-principals
+        shell: bash
+        env:
+          ENVIRONMENTS_INPUT: ${{ github.event.inputs.environments }}
+          SANDBOX_SP_INPUT: ${{ github.event.inputs.sandbox_service_principal }}
+          NONPROD_SP_INPUT: ${{ github.event.inputs.nonprod_service_principal }}
+          PRODUCTION_SP_INPUT: ${{ github.event.inputs.production_service_principal }}
         run: |
-          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          ENVIRONMENTS="$ENVIRONMENTS_INPUT"
           IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
           
           for ENV in "${ENV_ARRAY[@]}"; do
@@ -137,13 +154,13 @@ jobs:
             
             case $ENV in
               sandbox)
-                SP_ID="${{ github.event.inputs.sandbox_service_principal }}"
+                SP_ID="$SANDBOX_SP_INPUT"
                 ;;
               nonprod)
-                SP_ID="${{ github.event.inputs.nonprod_service_principal }}"
+                SP_ID="$NONPROD_SP_INPUT"
                 ;;
               production)
-                SP_ID="${{ github.event.inputs.production_service_principal }}"
+                SP_ID="$PRODUCTION_SP_INPUT"
                 ;;
               *)
                 echo "❌ Invalid environment: $ENV"
@@ -185,11 +202,15 @@ jobs:
 
       - name: Production environment validation
         if: contains(github.event.inputs.environments, 'production')
+        shell: bash
+        env:
+          DATA_CLASS_INPUT: ${{ github.event.inputs.data_classification }}
+          JUSTIFICATION_INPUT: ${{ github.event.inputs.business_justification }}
         run: |
           echo "🔒 Production environment access requested"
           echo "🔍 Performing additional security validation..."
           
-          DATA_CLASS="${{ github.event.inputs.data_classification }}"
+          DATA_CLASS="$DATA_CLASS_INPUT"
           
           # Restricted data requires additional approval
           if [[ "$DATA_CLASS" == "restricted" ]]; then
@@ -199,7 +220,7 @@ jobs:
           fi
           
           # Check business justification length
-          JUSTIFICATION="${{ github.event.inputs.business_justification }}"
+          JUSTIFICATION="$JUSTIFICATION_INPUT"
           if [[ ${#JUSTIFICATION} -lt 50 ]]; then
             echo "❌ Business justification too short for production access"
             echo "Please provide detailed justification (minimum 50 characters) for production access"
@@ -210,42 +231,58 @@ jobs:
 
       - name: Set validation outputs
         id: validate
+        shell: bash
+        env:
+          ENVIRONMENTS_INPUT: ${{ github.event.inputs.environments }}
+          CONTAINS_PRODUCTION: ${{ contains(github.event.inputs.environments, 'production') }}
         run: |
-          echo "validation_passed=true" >> $GITHUB_OUTPUT
-          echo "validated_environments=${{ github.event.inputs.environments }}" >> $GITHUB_OUTPUT
+          echo "validation_passed=true" >> "$GITHUB_OUTPUT"
+          echo "validated_environments=$ENVIRONMENTS_INPUT" >> "$GITHUB_OUTPUT"
           
           # Determine if manual approval required
           REQUIRES_APPROVAL="false"
-          if [[ "${{ contains(github.event.inputs.environments, 'production') }}" == "true" ]]; then
+          if [[ "$CONTAINS_PRODUCTION" == "true" ]]; then
             REQUIRES_APPROVAL="true"
           fi
-          echo "requires_approval=$REQUIRES_APPROVAL" >> $GITHUB_OUTPUT
+          echo "requires_approval=$REQUIRES_APPROVAL" >> "$GITHUB_OUTPUT"
 
   manual-approval:
     name: Manual Approval (Production)
     runs-on: ubuntu-latest
+    timeout-minutes: 1440  # 24 hours for manual approval
+    permissions: {}
     needs: security-validation
     if: needs.security-validation.outputs.requires_approval == 'true'
     environment: production-onboarding  # Requires manual approval in GitHub
     
     steps:
       - name: Production access confirmation
+        shell: bash
+        env:
+          TEAM_NAME: ${{ github.event.inputs.team_name }}
+          REQUESTOR_EMAIL: ${{ github.event.inputs.requestor_email }}
+          DATA_CLASSIFICATION: ${{ github.event.inputs.data_classification }}
+          BUSINESS_JUSTIFICATION: ${{ github.event.inputs.business_justification }}
         run: |
           echo "🚨 PRODUCTION REGISTRY ACCESS REQUEST"
           echo ""
-          echo "Team: ${{ github.event.inputs.team_name }}"
-          echo "Requestor: ${{ github.event.inputs.requestor_email }}"
-          echo "Data Classification: ${{ github.event.inputs.data_classification }}"
-          echo "Justification: ${{ github.event.inputs.business_justification }}"
+          echo "Team: $TEAM_NAME"
+          echo "Requestor: $REQUESTOR_EMAIL"
+          echo "Data Classification: $DATA_CLASSIFICATION"
+          echo "Justification: $BUSINESS_JUSTIFICATION"
           echo ""
           echo "Manual approval granted for production access."
 
   provision-terraform:
     name: Provision Registry Access
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      id-token: write
+      contents: read
     needs: [security-validation, manual-approval]
     if: |
-      always() && 
+      !cancelled() && 
       needs.security-validation.outputs.validation_passed == 'true' && 
       (needs.manual-approval.result == 'success' || needs.manual-approval.result == 'skipped')
     
@@ -267,9 +304,20 @@ jobs:
 
       - name: Generate team configuration
         id: config
+        shell: bash
+        env:
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
+          ENVIRONMENTS_INPUT: ${{ github.event.inputs.environments }}
+          AZURE_AD_GROUP_ID: ${{ github.event.inputs.azure_ad_group_id }}
+          SANDBOX_SP: ${{ github.event.inputs.sandbox_service_principal }}
+          NONPROD_SP: ${{ github.event.inputs.nonprod_service_principal }}
+          PRODUCTION_SP: ${{ github.event.inputs.production_service_principal }}
+          DATA_CLASSIFICATION: ${{ github.event.inputs.data_classification }}
+          BUSINESS_JUSTIFICATION: ${{ github.event.inputs.business_justification }}
+          REQUESTOR_EMAIL: ${{ github.event.inputs.requestor_email }}
         run: |
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
-          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          TEAM_NAME="$TEAM_NAME_INPUT"
+          ENVIRONMENTS="$ENVIRONMENTS_INPUT"
           
           # Convert environments to Terraform format
           IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
@@ -293,13 +341,13 @@ jobs:
               # Get appropriate service principal
               case $TIER in
                 sandbox)
-                  SP_ID="${{ github.event.inputs.sandbox_service_principal }}"
+                  SP_ID="$SANDBOX_SP"
                   ;;
                 nonprod)
-                  SP_ID="${{ github.event.inputs.nonprod_service_principal }}"
+                  SP_ID="$NONPROD_SP"
                   ;;
                 production)
-                  SP_ID="${{ github.event.inputs.production_service_principal }}"
+                  SP_ID="$PRODUCTION_SP"
                   ;;
               esac
               
@@ -307,19 +355,19 @@ jobs:
               cat > "$CONFIG_DIR/${TEAM_NAME}.tf" << EOF
           # Team configuration for: $TEAM_NAME
           # Generated on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          # Requestor: ${{ github.event.inputs.requestor_email }}
+          # Requestor: $REQUESTOR_EMAIL
           # Registry Tier: $TIER
           
           locals {
             team_${TEAM_NAME//-/_}_${TIER} = {
               name                 = "$TEAM_NAME"
-              azure_ad_group_id    = "${{ github.event.inputs.azure_ad_group_id }}"
+              azure_ad_group_id    = "$AZURE_AD_GROUP_ID"
               service_principal_id = $(if [[ -n "$SP_ID" ]]; then echo "\"$SP_ID\""; else echo "null"; fi)
               environments         = $ENV_LIST
-              data_classification  = "${{ github.event.inputs.data_classification }}"
-              business_justification = "${{ github.event.inputs.business_justification }}"
+              data_classification  = "$DATA_CLASSIFICATION"
+              business_justification = "$BUSINESS_JUSTIFICATION"
               onboarded_date      = "$(date -u +"%Y-%m-%d")"
-              requestor_email     = "${{ github.event.inputs.requestor_email }}"
+              requestor_email     = "$REQUESTOR_EMAIL"
             }
           }
           
@@ -345,8 +393,11 @@ jobs:
           done
 
       - name: Apply Terraform changes
+        shell: bash
+        env:
+          ENVIRONMENTS_INPUT: ${{ github.event.inputs.environments }}
         run: |
-          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          ENVIRONMENTS="$ENVIRONMENTS_INPUT"
           
           # Apply changes to each relevant registry tier
           for TIER in sandbox nonprod production; do
@@ -372,14 +423,19 @@ jobs:
           done
 
       - name: Validate provisioned access
+        shell: bash
+        env:
+          TEAM_NAME_INPUT: ${{ github.event.inputs.team_name }}
+          GROUP_ID_INPUT: ${{ github.event.inputs.azure_ad_group_id }}
+          ENVIRONMENTS_INPUT: ${{ github.event.inputs.environments }}
         run: |
           echo "🔍 Validating provisioned registry access..."
           
-          TEAM_NAME="${{ github.event.inputs.team_name }}"
-          GROUP_ID="${{ github.event.inputs.azure_ad_group_id }}"
+          TEAM_NAME="$TEAM_NAME_INPUT"
+          GROUP_ID="$GROUP_ID_INPUT"
           
           # Test access for each registry
-          ENVIRONMENTS="${{ github.event.inputs.environments }}"
+          ENVIRONMENTS="$ENVIRONMENTS_INPUT"
           IFS=',' read -ra ENV_ARRAY <<< "$ENVIRONMENTS"
           
           for ENV in "${ENV_ARRAY[@]}"; do
@@ -413,8 +469,11 @@ jobs:
   create-tracking-issue:
     name: Create Tracking Issue
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      issues: write
     needs: [security-validation, provision-terraform]
-    if: always()
+    if: '!cancelled()'
     
     steps:
       - name: Create success issue
@@ -432,9 +491,10 @@ jobs:
             - **Data Classification:** ${{ github.event.inputs.data_classification }}
 
             **Access Granted:**
-            ${{ github.event.inputs.environments.split(',').map(env => 
-              `- ✅ **${env.trim()}** environment - Repository pattern: \`{registry}/${env.trim()}/${{ github.event.inputs.team_name }}/{image}:{tag}\``
-            ).join('\n') }}
+            ${{ join(
+              github.event.inputs.environments.split(',').map(env => 
+                format('- ✅ **{0}** environment - Repository pattern: `{{registry}}/{0}/${{ github.event.inputs.team_name }}/{{image}}:{{tag}}`', env.trim())
+              ), '\n') }}
 
             **Security Features:**
             - ✅ Azure AD Group assigned AcrPull role for team members
@@ -448,18 +508,15 @@ jobs:
             3. **Request Additional Environments** - Expand access as your team grows
 
             **Repository Examples:**
-            ${{ github.event.inputs.environments.split(',').map(env => {
-              const registryMap = {
-                'sandbox': 'brightcloudsandbox.azurecr.io',
-                'pr': 'brightcloudnonprod.azurecr.io', 
-                'dev': 'brightcloudnonprod.azurecr.io',
-                'perf': 'brightcloudnonprod.azurecr.io',
-                'preproduction': 'brightcloudnonprod.azurecr.io',
-                'production': 'brightcloudproduction.azurecr.io'
-              };
-              const registry = registryMap[env.trim()] || 'registry.azurecr.io';
-              return `- **${env.trim()}**: \`${registry}/${env.trim()}/${{ github.event.inputs.team_name }}/my-app:v1.0.0\``;
-            }).join('\n') }}
+            ${{ join(
+              github.event.inputs.environments.split(',').map(env => {
+                let registry = 'registry.azurecr.io';
+                const trimmedEnv = env.trim();
+                if (trimmedEnv === 'sandbox') registry = 'brightcloudsandbox.azurecr.io';
+                else if (['pr', 'dev', 'perf', 'preproduction'].includes(trimmedEnv)) registry = 'brightcloudnonprod.azurecr.io';
+                else if (trimmedEnv === 'production') registry = 'brightcloudproduction.azurecr.io';
+                return format('- **{0}**: `{1}/{0}/${{ github.event.inputs.team_name }}/my-app:v1.0.0`', trimmedEnv, registry);
+              }), '\n') }}
 
             **Workflow Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
@@ -510,8 +567,10 @@ jobs:
   notify-requestor:
     name: Notify Requestor
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
     needs: [security-validation, provision-terraform]
-    if: always()
+    if: '!cancelled()'
     
     steps:
       - name: Send notification email
